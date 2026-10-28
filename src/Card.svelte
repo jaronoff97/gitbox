@@ -1,38 +1,40 @@
 <script lang="ts">
-	import { get_native, type GpuixEvent, type ShadowNode } from 'gpuix-svelte';
+	import type { GpuixEvent, ShadowNode } from 'gpuix-svelte';
 	import { words } from './filters.ts';
 	import { link, open_url, type Notification } from './gh.ts';
+	import { card_nodes } from './card_nodes.ts';
 	import { subject_icon } from './icons.ts';
 
 	/** `onmenu` opens the context menu at window coordinates (#2); `onselect` reports ⌘- and ⇧-clicks (#3). */
 	let {
 		n,
 		selected,
+		focused,
 		onmenu,
-		onselect
+		onselect,
+		onpoint,
+		onhover
 	}: {
 		n: Notification;
 		selected: boolean;
+		/** The board's keyboard focus (#5) is on this card. */
+		focused: boolean;
 		onmenu: (x: number, y: number) => void;
 		onselect: (how: 'toggle' | 'range') => void;
+		/** Any click: the keyboard focus moves here. */
+		onpoint: () => void;
+		/** The pointer came onto this card: the card, not its lane, gets the hover, as it paints over it. */
+		onhover: () => void;
 	} = $props();
 
 	/** A plain click opens the card; ⌘ toggles it in the selection, ⇧ selects up to it. */
 	function click(e: GpuixEvent) {
+		onpoint();
 		if (e.modifiers?.cmd) onselect('toggle');
 		else if (e.modifiers?.shift) onselect('range');
 		else open();
 	}
-	let el: ShadowNode | null = null;
 
-	/** Shift+F10 opens the menu from the keyboard, near the card's top left. */
-	function key(e: GpuixEvent) {
-		if (e.key === 'enter') open();
-		else if (e.key === 'f10' && e.modifiers?.shift) {
-			const b = el?.nativeId == null ? null : get_native()?.getElementBounds(el.nativeId);
-			if (b) onmenu(b.x + 24, b.y + 24);
-		}
-	}
 
 	let subject = $derived(subject_icon(n));
 
@@ -54,13 +56,18 @@
 	class="card"
 	class:read={!n.unread}
 	class:selected
+	class:focused
 	testId="card-{n.id}"
 	hitbox="self"
 	tabindex={0}
 	onclick={click}
-	onauxclick={(e: GpuixEvent) => e.isRightClick && onmenu(e.x ?? 0, e.y ?? 0)}
-	onkeydown={key}
-	{@attach (node: ShadowNode) => (el = node)}
+	onauxclick={(e: GpuixEvent) => e.isRightClick && (onpoint(), onmenu(e.x ?? 0, e.y ?? 0))}
+	onfocus={onpoint}
+	onmouseenter={onhover}
+	{@attach (node: ShadowNode) => {
+		card_nodes.set(n.id, node);
+		return () => card_nodes.get(n.id) === node && card_nodes.delete(n.id);
+	}}
 >
 	<div class="top">
 		{#if n.repository.owner?.avatar_url}
@@ -110,6 +117,10 @@
 		background-color: var(--raised);
 	}
 	.card:focus-visible {
+		outline-width: 2px;
+		outline-color: var(--accent);
+	}
+	.card.focused {
 		outline-width: 2px;
 		outline-color: var(--accent);
 	}

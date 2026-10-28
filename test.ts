@@ -88,6 +88,7 @@ process.env.FAKE_LOG = join(bin, 'calls.log');
 const calls = (): { cmd: string; stdin?: string }[] =>
 	existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
 const called = (cmd: string) => calls().some((c) => c.cmd === cmd);
+const settings_filters = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8')).settings.filters.length;
 process.env.PATH = `${bin}:${process.env.PATH}`;
 // The saved state goes to a temp dir, not the real ~/.config/gitbox.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'gitbox-config-'));
@@ -447,6 +448,84 @@ check('⌘A in a text field selects no cards', !all_text().some((t) => / selecte
 press('escape');
 await wait(100);
 
+// Keyboard navigation (#5): the board's focus is a card; keys move it and act on it.
+const times = (cmd: string) => calls().filter((c) => c.cmd === cmd).length;
+const open_count = (id: number) => times(`open https://github.com/octo/repo/pull/${id}`);
+const last_open = () => calls().filter((c) => c.cmd.startsWith('open ')).at(-1)?.cmd ?? '';
+press('escape');
+press('escape');
+hover(find_test_id('lane-todo')!);
+press('j');
+press('j');
+press('enter');
+await wait_for(() => open_count(6) === 1, { label: 'j j ↩' });
+check('the first j focuses the lane under the pointer, j moves down, ↩ opens', last_open().endsWith('/pull/6'));
+const fours = open_count(4);
+press('l');
+press('k');
+press('enter');
+await wait_for(() => open_count(4) > fours, { label: 'l k ↩' });
+check('l moves to the next lane at the same row, k moves up', last_open().endsWith('/pull/4'));
+
+// Keys typed into a text field don't move the board.
+click_test_id('add-filter');
+await wait_for(() => has('Repository'), { label: 'the filter menu' });
+click_test_id('field-repo');
+await wait_for(() => find_test_id('filter-search') !== null, { label: 'the search' });
+type('j j');
+press('escape');
+await wait(100);
+press('enter');
+await wait_for(() => open_count(4) > fours + 1, { label: '↩ after typing in the search' });
+check('j typed in the search leaves the focus where it was', last_open().endsWith('/pull/4'));
+
+// The filter menu by keyboard: ↓ ↩ opens the second field, ↩ toggles its first value, ⌘[ goes back.
+click_test_id('add-filter');
+await wait_for(() => has('Repository'), { label: 'the filter menu again' });
+press('down');
+press('enter');
+await wait_for(() => has('pull request'), { label: 'the Type values' });
+press('enter');
+await wait_for(() => find_test_id('chip-type-pull request') !== null, { label: 'a chip from the keyboard' });
+press('cmd-[');
+await wait_for(() => has('Repository'), { label: '⌘[ goes back to the fields' });
+check('the filter menu works from the keyboard', find_test_id('chip-type-pull request') !== null);
+press('escape');
+await wait(100);
+click_test_id('chip-type-pull request');
+press('backspace');
+await wait_for(() => !find_test_id('chip-type-pull request'), { label: '⌫ on a chip' });
+check('⌫ on a focused chip removes it', settings_filters() === 0);
+
+// Card keys: e marks the focused card done and the focus moves to the card in its place.
+press('k');
+const done_4 = times('api -X DELETE notifications/threads/4');
+press('e');
+await wait_for(() => times('api -X DELETE notifications/threads/4') > done_4, { label: 'e' });
+const eights = open_count(8);
+press('enter');
+await wait_for(() => open_count(8) > eights, { label: '↩ after e' });
+check('e marks the focused card done, and the next card takes the focus', last_open().endsWith('/pull/8'));
+
+// Shift+F10 opens the menu at the focused card; ↩ runs its first item.
+press('shift-f10');
+await wait_for(() => has('Mark as Done'), { label: 'Shift+F10' });
+press('enter');
+await wait_for(() => open_count(8) > eights + 1, { label: '↩ in the menu' });
+check('Shift+F10 opens the card menu, and ↩ runs its first item', !has('Mark as Done'));
+press('c');
+await wait_for(() => has('Comment on octo/repo #8'), { label: 'c' });
+check('c opens the comment dialog for the focused card', has('Comment on octo/repo #8'));
+press('escape');
+await wait(100);
+
+// ⌘↓: the end of the lane, which asks for more as a scroll to the end does.
+press('cmd-down');
+press('enter');
+await wait_for(() => !last_open().endsWith('/pull/8'), { label: '⌘↓ ↩' });
+check('⌘↓ goes to the end of the lane', Number(last_open().split('/').pop()) > 150);
+press('escape');
+
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
@@ -463,6 +542,20 @@ check('settings change the board at once', !has('Merged / Closed') && badges('25
 check('settings are saved', saved().settings.lanes.find((l: { key: string }) => l.key === 'done').shown === false && saved().settings.lane_size === 25);
 press('escape');
 await wait_for(() => !has('Cards per lane'), { label: 'Escape closes settings' });
+
+// The settings dialog by keyboard: the focus starts on its first control; Space picks, → moves on.
+press('cmd-,');
+await wait_for(() => has('Cards per lane'), { label: '⌘, opens settings' });
+// The dialog takes the focus a tick after it mounts, when its controls exist natively.
+await wait(100);
+press('right');
+await wait(100);
+check('→ on a choice picks the next option', saved().settings.lane_size === 50);
+press('left');
+await wait(100);
+check('← picks the one before', saved().settings.lane_size === 25);
+press('escape');
+await wait_for(() => !has('Cards per lane'), { label: 'Escape closes settings again' });
 
 await app.unmount();
 app = mount_headless(App, { width: 1280, height: 800 });
@@ -487,6 +580,14 @@ click_test_id('setup');
 await wait_for(() => text().includes('gh auth login'), { label: 'onboarding again' });
 check('run setup again clears the saved state', saved().onboarded === false);
 
+// Onboarding by keyboard (#5): ↩ checks again, then ↩ shows the notifications.
+process.env.FAKE_AUTHED = '1';
+press('enter');
+await wait_for(() => has('Show notifications'), { label: '↩ checks again' });
+press('enter');
+await wait_for(() => has('Todo'), { label: '↩ shows the board' });
+check('onboarding works from the keyboard', saved().onboarded === true);
+
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
 	({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
@@ -508,4 +609,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 70);
+finish('gitbox', 82);

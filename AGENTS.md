@@ -105,6 +105,13 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   in `App.svelte`, is the only app-wide key handler (dialogs keep their own Escape/Enter). A single
   key, or a command with `skip_editing`, doesn't run while a text field has focus. `caps()` draws
   keys; `src/Shortcuts.svelte` (⌘/) lists them.
+- Keyboard (#5): the board's focus is state, `{ lane, id, index }`, as most cards aren't mounted.
+  j/k/h/l (or arrows) move it, ↩ opens, r/e/u/c act, Shift+F10 opens the menu (`card_nodes.ts`
+  finds where the card is drawn). A key move bumps `reveal`, and the lane scrolls the card into
+  view; a click does not. `src/listnav.svelte.ts` gives the filter menu and the card menu ↑↓↩.
+  An `<input>` takes Enter as `onsubmit` and ⌫/← as its own editing keys (no key event), so the
+  filter menu's back key is ⌘[. The settings dialog keeps Tab inside it and focuses its first
+  control a tick after it mounts, when the controls exist natively.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.

@@ -1,6 +1,14 @@
 <script lang="ts">
 	import Portal from 'gpuix-svelte/components/Portal.svelte';
-	import { on_window_key } from 'gpuix-svelte';
+	import {
+		focus_element,
+		focus_next_within,
+		focus_previous_within,
+		focused_element,
+		on_window_key,
+		type GpuixEvent,
+		type ShadowNode
+	} from 'gpuix-svelte';
 	import pkg from '../package.json' with { type: 'json' };
 	import { close } from './icons.ts';
 	import { DEFAULTS, lane_shown, settings, toggle_lane, update } from './settings.svelte.ts';
@@ -8,17 +16,47 @@
 
 	let { login, onclose, onsetup }: { login: string; onclose: () => void; onsetup: () => void } = $props();
 
-	$effect(() =>
-		on_window_key('keydown', (e) => {
+	let dialog: ShadowNode | null = null;
+	/** Where the focus was before the dialog opened; it goes back there when the dialog closes. */
+	const before = focused_element();
+
+	// Keyboard (#5): focus moves into the dialog (as it mounts, below) and Tab stays there. Escape closes it.
+	$effect(() => {
+		const off = on_window_key('keydown', (e: GpuixEvent) => {
 			if (e.key === 'escape') onclose();
-		})
-	);
+			else if (e.key === 'tab' && dialog) {
+				e.preventDefault();
+				(e.modifiers?.shift ? focus_previous_within : focus_next_within)(dialog);
+			}
+		});
+		return () => {
+			off();
+			if (before) focus_element(before);
+		};
+	});
+
+	const pressed = (e: GpuixEvent) => e.key === 'space' || e.key === 'enter';
+
+	/** Space or ↩ picks an option; ← and → move along the choice. */
+	function choose(e: GpuixEvent, key: 'lane_size' | 'batch' | 'refresh_minutes', options: [number, string][], value: number) {
+		const at = options.findIndex(([v]) => v === settings[key]);
+		if (pressed(e)) update({ [key]: value });
+		else if (e.key === 'left' && at > 0) update({ [key]: options[at - 1][0] });
+		else if (e.key === 'right' && at < options.length - 1) update({ [key]: options[at + 1][0] });
+	}
 </script>
 
 {#snippet choice(key: 'lane_size' | 'batch' | 'refresh_minutes', options: [number, string][])}
 	<div class="seg">
 		{#each options as [value, label] (value)}
-			<div class="opt" class:on={settings[key] === value} testId="{key}-{value}" tabindex={0} onclick={() => update({ [key]: value })}>
+			<div
+				class="opt"
+				class:on={settings[key] === value}
+				testId="{key}-{value}"
+				tabindex={0}
+				onclick={() => update({ [key]: value })}
+				onkeydown={(e: GpuixEvent) => choose(e, key, options, value)}
+			>
 				{label}
 			</div>
 		{/each}
@@ -26,13 +64,29 @@
 {/snippet}
 
 {#snippet hide_lane(key: string)}
-	<div class="switch" class:on={!lane_shown(key)} hitbox="self" testId="toggle-hide-{key}" tabindex={0} onclick={() => toggle_lane(key)}>
+	<div
+		class="switch"
+		class:on={!lane_shown(key)}
+		hitbox="self"
+		testId="toggle-hide-{key}"
+		tabindex={0}
+		onclick={() => toggle_lane(key)}
+		onkeydown={(e: GpuixEvent) => pressed(e) && toggle_lane(key)}
+	>
 		<div class="knob" class:on={!lane_shown(key)}></div>
 	</div>
 {/snippet}
 
 {#snippet toggle(key: 'participating' | 'include_read')}
-	<div class="switch" class:on={settings[key]} hitbox="self" testId="toggle-{key}" tabindex={0} onclick={() => update({ [key]: !settings[key] })}>
+	<div
+		class="switch"
+		class:on={settings[key]}
+		hitbox="self"
+		testId="toggle-{key}"
+		tabindex={0}
+		onclick={() => update({ [key]: !settings[key] })}
+		onkeydown={(e: GpuixEvent) => pressed(e) && update({ [key]: !settings[key] })}
+	>
 		<div class="knob" class:on={settings[key]}></div>
 	</div>
 {/snippet}
@@ -46,7 +100,11 @@
 
 <Portal>
 	<div class="scrim" onclick={onclose}>
-		<div class="dialog" testId="settings-dialog" onclick={() => {}}>
+		<div class="dialog" testId="settings-dialog" onclick={() => {}} {@attach (node: ShadowNode) => {
+				dialog = node;
+				// Its children get native ids when this frame commits, so the focus moves in a tick later.
+				setTimeout(() => focus_next_within(node));
+			}}>
 			<div class="head">
 				<div class="title">Settings</div>
 				<svg class="x" source={close} testId="settings-close" onclick={onclose}></svg>
@@ -97,11 +155,17 @@
 			</div>
 			<div class="row">
 				{@render row('Account', login ? `Signed in as ${login} through the gh CLI.` : 'Signed in through the gh CLI.')}
-				<div class="btn" testId="settings-setup" tabindex={0} onclick={onsetup}>Run setup again</div>
+				<div class="btn" testId="settings-setup" tabindex={0} onclick={onsetup} onkeydown={(e: GpuixEvent) => pressed(e) && onsetup()}>Run setup again</div>
 			</div>
 			<div class="row">
 				{@render row('Reset', 'Put every setting back to its default.')}
-				<div class="btn" testId="settings-reset" tabindex={0} onclick={() => update({ ...DEFAULTS })}>Reset</div>
+				<div
+					class="btn"
+					testId="settings-reset"
+					tabindex={0}
+					onclick={() => update({ ...DEFAULTS })}
+					onkeydown={(e: GpuixEvent) => pressed(e) && update({ ...DEFAULTS })}
+				>Reset</div>
 			</div>
 
 			<div class="about">gitbox {pkg.version} · {state_file()}</div>

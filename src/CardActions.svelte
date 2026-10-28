@@ -3,8 +3,10 @@
 	import Portal from 'gpuix-svelte/components/Portal.svelte';
 	import Tooltip from 'gpuix-svelte/components/Tooltip.svelte';
 	import { on_window_key, type GpuixEvent } from 'gpuix-svelte';
+	import { untrack } from 'svelte';
 	import { close as close_icon } from './icons.ts';
 	import { number, web_url, type Action, type Notification } from './gh.ts';
+	import { list_nav } from './listnav.svelte.ts';
 
 	// The actions on cards: the context menu (#2), the bar for a selection (#3), and the dialogs they
 	// share. Close and opening many tabs ask first; Comment takes the text. Everything acts on a list:
@@ -12,6 +14,7 @@
 	// resolves to whether they all worked.
 	let {
 		target,
+		request,
 		selection,
 		progress,
 		onclose,
@@ -20,6 +23,8 @@
 		ondialog
 	}: {
 		target: { list: Notification[]; x: number; y: number } | null;
+		/** An action from the keyboard (#5): run as the menu would, with its dialog if it has one. */
+		request: { action: Action; list: Notification[]; seq: number } | null;
 		selection: Notification[];
 		/** A bulk action under way: "Marking 40 as done", with how many calls are back. */
 		progress: { verb: string; done: number; total: number } | null;
@@ -60,6 +65,46 @@
 		return null;
 	}
 
+	/** The menu for `list`: what applies, worded for one card or several; null is a separator. */
+	function menu_items(list: Notification[]): ({ action: Action; title: string; danger?: boolean } | null)[] {
+		const k = list.length;
+		const one = list[0];
+		const many = (single: string, several: string) => (k === 1 ? single : several);
+		return [
+			{ action: 'open', title: many('Open in Browser', `Open ${k} in Browser`) },
+			{ action: 'copy', title: many('Copy Link', `Copy ${k} Links`) },
+			null,
+			...(list.some((n) => n.unread) ? [{ action: 'read' as const, title: many('Mark as Read', `Mark ${k} as Read`) }] : []),
+			{ action: 'done', title: many('Mark as Done', `Mark ${k} as Done`) },
+			{ action: 'unsubscribe', title: many('Unsubscribe', `Unsubscribe from ${k}`) },
+			...(list.every(thread)
+				? [
+						null,
+						...(k === 1 ? [{ action: 'comment' as const, title: 'Comment…' }] : []),
+						...(closable(list)
+							? [{ action: 'close' as const, title: many(`Close ${noun(one)}…`, `Close ${k}…`), danger: true }]
+							: reopenable(list)
+								? [{ action: 'reopen' as const, title: many(`Reopen ${noun(one)}`, `Reopen ${k}`) }]
+								: [])
+					]
+				: [])
+		];
+	}
+
+	let items = $derived(target ? menu_items(target.list) : []);
+	let actions = $derived(items.filter((i) => i !== null));
+
+	// ↑↓ and ↩ in the menu (#5); Popover handles Escape.
+	const { nav } = list_nav({
+		active: () => target !== null,
+		count: () => actions.length,
+		pick: (i) => target && pick(actions[i].action, target.list)
+	});
+	$effect(() => {
+		void target;
+		nav.index = 0;
+	});
+
 	function pick(action: Action, list: Notification[]) {
 		onclose();
 		if (blocked(action, list)) return;
@@ -93,6 +138,11 @@
 
 	$effect(() => ondialog(confirming !== null || writing !== null || opening !== null));
 
+	$effect(() => {
+		const r = request;
+		if (r?.list.length) untrack(() => pick(r.action, r.list));
+	});
+
 	// Escape closes a dialog; Enter confirms; ⌘↩ sends a comment.
 	$effect(() => {
 		if (!confirming && !writing && !opening) return;
@@ -107,10 +157,6 @@
 		});
 	});
 </script>
-
-{#snippet item(action: Action, list: Notification[], title: string, danger = false)}
-	<div class="item" class:danger testId="menu-{action}" onclick={() => pick(action, list)}>{title}</div>
-{/snippet}
 
 {#snippet bar_button(action: Action, title: string)}
 	{@const reason = blocked(action, selection)}
@@ -135,26 +181,23 @@
 	<div></div>
 	{#snippet content()}
 		{#if target}
-			{@const list = target.list}
-			{@const k = list.length}
-			{@const one = list[0]}
 			<div class="menu">
-				{#if k > 1}<div class="head">{k} selected</div>{/if}
-				{@render item('open', list, k === 1 ? 'Open in Browser' : `Open ${k} in Browser`)}
-				{@render item('copy', list, k === 1 ? 'Copy Link' : `Copy ${k} Links`)}
-				<div class="sep"></div>
-				{#if list.some((n) => n.unread)}{@render item('read', list, k === 1 ? 'Mark as Read' : `Mark ${k} as Read`)}{/if}
-				{@render item('done', list, k === 1 ? 'Mark as Done' : `Mark ${k} as Done`)}
-				{@render item('unsubscribe', list, k === 1 ? 'Unsubscribe' : `Unsubscribe from ${k}`)}
-				{#if list.every(thread)}
-					<div class="sep"></div>
-					{#if k === 1}{@render item('comment', list, 'Comment…')}{/if}
-					{#if closable(list)}
-						{@render item('close', list, k === 1 ? `Close ${noun(one)}…` : `Close ${k}…`, true)}
-					{:else if reopenable(list)}
-						{@render item('reopen', list, k === 1 ? `Reopen ${noun(one)}` : `Reopen ${k}`)}
+				{#if target.list.length > 1}<div class="head">{target.list.length} selected</div>{/if}
+				{#each items as it, i (i)}
+					{#if it === null}
+						<div class="sep"></div>
+					{:else}
+						<div
+							class="item"
+							class:danger={it.danger}
+							class:active={actions.indexOf(it) === nav.index}
+							testId="menu-{it.action}"
+							onclick={() => target && pick(it.action, target.list)}
+						>
+							{it.title}
+						</div>
 					{/if}
-				{/if}
+				{/each}
 			</div>
 		{/if}
 	{/snippet}
@@ -278,6 +321,9 @@
 	.item:hover {
 		background-color: var(--accent);
 		color: var(--bg);
+	}
+	.item.active {
+		background-color: var(--border);
 	}
 	.item.danger {
 		color: var(--fail);

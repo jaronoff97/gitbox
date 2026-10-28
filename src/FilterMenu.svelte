@@ -3,17 +3,21 @@
 	import Tooltip from 'gpuix-svelte/components/Tooltip.svelte';
 	import { FIELDS, field, label_color, options, same, toggled, type Field, type Filter } from './filters.ts';
 	import type { Notification } from './gh.ts';
+	import { list_nav } from './listnav.svelte.ts';
 	import { filter as filter_icon, left, right } from './icons.ts';
 
 	let {
 		items,
 		filters,
-		onchange
+		onchange,
+		onopen
 	}: {
 		/** The loaded notifications, which the menu offers values from. */
 		items: Notification[];
 		filters: Filter[];
 		onchange: (filters: Filter[]) => void;
+		/** Whether the menu is open, so the board's arrow keys leave it alone. */
+		onopen: (open: boolean) => void;
 	} = $props();
 
 	let open = $state(false);
@@ -29,7 +33,19 @@
 	function pick(key: Field | null) {
 		picking = key;
 		query = '';
+		nav.index = 0;
 	}
+
+	$effect(() => onopen(open));
+
+	// ↑↓ move, ↩ opens a field or toggles a value, ⌘[ goes back to the fields. (The search box takes ⌫
+	// and ← as its own editing keys and sends no key event for them, so they can't be "back".)
+	const { nav, submit } = list_nav({
+		active: () => open,
+		count: () => (picking === null ? FIELDS.length : values.length),
+		pick: (i) => (picking === null ? pick(FIELDS[i].key) : onchange(toggled(filters, { field: picking, value: values[i].value }))),
+		back: (e) => e.key === '[' && picking !== null && (pick(null), true)
+	});
 </script>
 
 <Popover {open} onclose={() => (open = false)} align="end" testid="filter-menu" style="padding: 6px">
@@ -52,8 +68,8 @@
 	{#snippet content()}
 		<div class="menu">
 			{#if picking === null}
-				{#each FIELDS as f (f.key)}
-					<div class="item" testId="field-{f.key}" onclick={() => pick(f.key)}>
+				{#each FIELDS as f, i (f.key)}
+					<div class="item" class:active={i === nav.index} testId="field-{f.key}" onclick={() => pick(f.key)}>
 						<div class="name">{f.title}</div>
 						<div class="n">{options(items, f.key).length}</div>
 						<svg class="go" source={right}></svg>
@@ -62,13 +78,28 @@
 			{:else}
 				<div class="back" testId="filter-back" onclick={() => pick(null)}>
 					<svg class="go" source={left}></svg>
-					<div>{field(picking).title}</div>
+					<div class="grow">{field(picking).title}</div>
+					<div class="n">⌘[</div>
 				</div>
-				<input class="search" value={query} placeholder="Search…" testId="filter-search" onchange={(e) => (query = e.value ?? '')} />
+				<input
+					class="search"
+					value={query}
+					placeholder="Search…"
+					testId="filter-search"
+					autofocus
+					onchange={(e) => ((query = e.value ?? ''), (nav.index = 0))}
+					onsubmit={submit}
+				/>
 				<div class="values">
-					{#each values as o (o.value)}
+					{#each values as o, i (o.value)}
 						{@const f = { field: picking, value: o.value }}
-						<div class="item" class:picked={is_on(f)} testId="value-{o.value}" onclick={() => onchange(toggled(filters, f))}>
+						<div
+							class="item"
+							class:picked={is_on(f)}
+							class:active={i === nav.index}
+							testId="value-{o.value}"
+							onclick={() => onchange(toggled(filters, f))}
+						>
 							<div class="check">{is_on(f) ? '✓' : ''}</div>
 							{#if picking === 'label'}<div class="dot" style="background-color: #{label_color(items, o.value)}"></div>{/if}
 							<div class="name">{o.value}</div>
@@ -143,11 +174,17 @@
 	.back:hover {
 		background-color: var(--border);
 	}
+	.item.active {
+		background-color: var(--border);
+	}
 	.item.picked {
 		color: var(--accent);
 	}
 	.back {
 		font-weight: semibold;
+	}
+	.grow {
+		flex-grow: 1;
 	}
 	.check {
 		width: 12px;

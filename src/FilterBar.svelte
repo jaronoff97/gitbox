@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { GpuixEvent } from 'gpuix-svelte';
 	import { field, label_color, toggled, type Filter } from './filters.ts';
 	import type { Notification } from './gh.ts';
 	import { close } from './icons.ts';
@@ -20,7 +21,12 @@
 
 <div class="bar">
 	{#each filters as f (`${f.field}:${f.value}`)}
-		<div class="chip" testId="chip-{f.field}-{f.value}">
+		<div
+			class="chip"
+			testId="chip-{f.field}-{f.value}"
+			tabindex={0}
+			onkeydown={(e: GpuixEvent) => ['enter', 'backspace', 'delete'].includes(e.key ?? '') && onchange(toggled(filters, f))}
+		>
 			<div class="chip-field">{field(f.field).title}</div>
 			{#if f.field === 'label'}<div class="dot" style="background-color: #{label_color(items, f.value)}"></div>{/if}
 			<div class="chip-value">{f.value}</div>
@@ -51,6 +57,10 @@
 		border-radius: 11px;
 		background-color: var(--tool-hover);
 		font-size: 12px;
+	}
+	.chip:focus-visible {
+		outline-width: 2px;
+		outline-color: var(--accent);
 	}
 	.chip-field {
 		color: var(--muted);

@@ -10,6 +10,8 @@
 	import Settings from './Settings.svelte';
 	import Shortcuts from './Shortcuts.svelte';
 	import { register } from './commands.svelte.ts';
+	import { card_nodes } from './card_nodes.ts';
+	import { get_native } from 'gpuix-svelte';
 	import * as gh from './gh.ts';
 	import { notifications, PER_PAGE, viewer, type Action, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
@@ -50,6 +52,7 @@
 	let stale = $state(false);
 	let show_settings = $state(false);
 	let show_shortcuts = $state(false);
+	let filters_open = $state(false);
 	let menu = $state<{ list: Notification[]; x: number; y: number } | null>(null);
 	/** The selection (#3): thread ids, as the lanes are windowed and most cards aren't mounted. */
 	let selected = $state(new Set<string>());
@@ -58,6 +61,11 @@
 	/** The lane under the pointer, for ⌘A. */
 	let hover_lane: string | null = null;
 	let progress = $state<{ verb: string; done: number; total: number } | null>(null);
+	/** The keyboard focus (#5): a card, by lane and id; `index` keeps its place when the card leaves. */
+	let focus = $state<{ lane: string; id: string; index: number } | null>(null);
+	/** An action the keyboard asked for, which CardActions runs as its menu would (with any dialog). */
+	let request = $state<{ action: Action; list: Notification[]; seq: number } | null>(null);
+	let request_seq = 0;
 	/** A card action's dialog is open: ⌘↩ is its key then (the comment dialog sends with it). */
 	let dialog = $state(false);
 	type Note = { id: number; text: string; error: boolean; open?: () => void };
@@ -168,6 +176,66 @@
 		reopen: (k) => `Reopening ${k}`,
 		comment: (k) => `Commenting on ${k}`
 	};
+
+	const focused = () => {
+		const f = focus;
+		return f ? (lanes.find((l) => l.key === f.lane)?.cards.find((c) => c.id === f.id) ?? null) : null;
+	};
+
+	/** Bumped when a key moves the focus: the lane scrolls that card into view. A click doesn't. */
+	let reveal = $state(0);
+
+	function focus_at(lane: (typeof lanes)[number] | undefined, index: number, by_key = true) {
+		if (!lane?.cards.length) return;
+		const i = Math.max(0, Math.min(index, lane.cards.length - 1));
+		focus = { lane: lane.key, id: lane.cards[i].id, index: i };
+		if (by_key) reveal++;
+	}
+
+	// A focused card that leaves (done, a filter) hands the focus to the card that takes its place.
+	$effect(() => {
+		const f = focus;
+		if (!f) return;
+		const lane = lanes.find((l) => l.key === f.lane);
+		if (!lane?.cards.length) return void (focus = null);
+		const i = lane.cards.findIndex((c) => c.id === f.id);
+		if (i < 0) focus_at(lane, f.index, false);
+		else if (i !== f.index) focus = { ...f, index: i };
+	});
+
+	/** j and k: the next or previous card; the first key focuses the lane under the pointer. */
+	function move(step: number) {
+		const f = focus;
+		const lane = lanes.find((l) => l.key === (f?.lane ?? hover_lane)) ?? lanes.find((l) => l.cards.length);
+		if (!f || !lane) return focus_at(lane, 0);
+		focus_at(lane, f.index + step);
+		// At the last card, j asks for more, as a scroll to the end does.
+		if (step > 0 && f.index + step >= lane.cards.length - 1) grow(lane.key);
+	}
+
+	/** h and l: the next or previous lane that has cards, at the same row. */
+	function move_lane(step: number) {
+		const f = focus;
+		const full = lanes.filter((l) => l.cards.length);
+		if (!f) return move(0);
+		const at = full.findIndex((l) => l.key === f.lane);
+		focus_at(full[Math.max(0, Math.min(at + step, full.length - 1))], f.index);
+	}
+
+	/** What a card key acts on: the selection if the focused card is in it, else the focused card. */
+	const targets = () => {
+		const n = focused();
+		return !n ? [] : selected.has(n.id) && selected.size > 1 ? selection : [n];
+	};
+	const ask = (action: Action) => (request = { action, list: targets(), seq: ++request_seq });
+
+	/** Shift+F10: the context menu at the focused card, as a right click would open it. */
+	function menu_at_focus() {
+		const n = focused();
+		const node = n && card_nodes.get(n.id);
+		const b = node?.nativeId == null ? null : get_native()?.getElementBounds(node.nativeId);
+		if (n && b) open_menu(n, b.x + 24, b.y + 24);
+	}
 
 	/** ⌘-click toggles `n`; ⇧-click adds the range from the anchor, by the lane's order. */
 	function select(n: Notification, how: 'toggle' | 'range') {
@@ -330,7 +398,7 @@
 	});
 
 	/** A dialog or menu is open: board keys (Escape, ⌘A, ⌘↩) leave it alone. */
-	const modal = () => dialog || menu !== null || show_settings || show_shortcuts;
+	const modal = () => dialog || menu !== null || filters_open || show_settings || show_shortcuts;
 
 	// The board's commands (#4): the keys, the ⌘/ overlay, the palette and the menu bar read them.
 	$effect(() =>
@@ -378,6 +446,60 @@
 				run: () => update({ participating: !settings.participating })
 			},
 			{ id: 'view.clear-filters', title: 'Clear Filters', group: 'view', keys: 'alt-cmd-f', when: () => settings.filters.length > 0, run: () => filter([]) },
+			// Keyboard navigation (#5).
+			{ id: 'go.next', title: 'Next Card', group: 'go', keys: 'j', also: ['down'], when: () => !modal(), run: () => move(1) },
+			{ id: 'go.previous', title: 'Previous Card', group: 'go', keys: 'k', also: ['up'], when: () => !modal(), run: () => move(-1) },
+			{ id: 'go.next-lane', title: 'Next Lane', group: 'go', keys: 'l', also: ['right'], when: () => !modal(), run: () => move_lane(1) },
+			{ id: 'go.previous-lane', title: 'Previous Lane', group: 'go', keys: 'h', also: ['left'], when: () => !modal(), run: () => move_lane(-1) },
+			{ id: 'go.top', title: 'Top of Lane', group: 'go', keys: 'cmd-up', when: () => !modal() && focus !== null, run: () => move(-Infinity) },
+			{ id: 'go.end', title: 'End of Lane', group: 'go', keys: 'cmd-down', when: () => !modal() && focus !== null, run: () => move(Infinity) },
+			{
+				id: 'go.clear-focus',
+				title: 'Clear Focus',
+				group: 'go',
+				keys: 'escape',
+				when: () => !modal() && focus !== null && selected.size === 0,
+				run: () => (focus = null)
+			},
+			{
+				id: 'file.open',
+				title: 'Open in Browser',
+				group: 'file',
+				keys: 'enter',
+				also: ['cmd-o'],
+				when: () => !modal() && focused() !== null,
+				run: () => gh.link(focused()!).then(gh.open_url)
+			},
+			{
+				id: 'file.open-repo',
+				title: 'Open Repository',
+				group: 'file',
+				keys: 'shift-enter',
+				when: () => !modal() && focused() !== null,
+				run: () => gh.open_url(focused()!.repository.html_url)
+			},
+			{ id: 'file.copy-link', title: 'Copy Link', group: 'file', keys: 'shift-cmd-c', when: () => !modal() && focused() !== null, run: () => ask('copy') },
+			{ id: 'notification.read', title: 'Mark as Read', group: 'notification', keys: 'r', when: () => !modal() && focused() !== null, run: () => ask('read') },
+			{ id: 'notification.done', title: 'Mark as Done', group: 'notification', keys: 'e', when: () => !modal() && focused() !== null, run: () => ask('done') },
+			{ id: 'notification.unsubscribe', title: 'Unsubscribe', group: 'notification', keys: 'u', when: () => !modal() && focused() !== null, run: () => ask('unsubscribe') },
+			{ id: 'notification.comment', title: 'Comment…', group: 'notification', keys: 'c', when: () => !modal() && focused() !== null, run: () => ask('comment') },
+			{
+				id: 'notification.close',
+				title: 'Close Pull Request or Issue…',
+				group: 'notification',
+				keys: 'shift-cmd-backspace',
+				when: () => !modal() && focused() !== null,
+				run: () => ask('close')
+			},
+			{ id: 'notification.menu', title: 'Show Actions', group: 'notification', keys: 'shift-f10', when: () => !modal() && focused() !== null, run: menu_at_focus },
+			{
+				id: 'view.sort-lane',
+				title: 'Sort Lane Oldest / Newest First',
+				group: 'view',
+				keys: 'alt-cmd-s',
+				when: () => focus !== null,
+				run: () => flip(focus!.lane)
+			},
 			{ id: 'help.shortcuts', title: 'Keyboard Shortcuts', group: 'help', keys: 'cmd-/', run: () => (show_shortcuts = !show_shortcuts) },
 			{ id: 'help.setup', title: 'Check gh Setup', group: 'help', run: onsetup },
 			{ id: 'help.report', title: 'Report an Issue', group: 'help', run: () => gh.open_url('https://github.com/jaronoff97/gitbox/issues/new') },
@@ -408,7 +530,7 @@
 			</div>
 		</div>
 		<div class="grow"></div>
-		<FilterMenu {items} filters={settings.filters} onchange={filter} />
+		<FilterMenu {items} filters={settings.filters} onchange={filter} onopen={(open) => (filters_open = open)} />
 		<Tooltip content="Refresh (⌘R)" side="bottom">
 			{#snippet children(hover)}
 				<div class="tool" class:busy={loading} {...hover} hitbox="self" testId="refresh" tabindex={0} onclick={start}>
@@ -457,6 +579,9 @@
 				{selected}
 				onselect={select}
 				onhover={() => (hover_lane = lane.key)}
+				focused_id={focus?.lane === lane.key ? focus.id : null}
+				onfocus={(n) => focus_at(lane, lane.cards.indexOf(n), false)}
+				reveal={focus?.lane === lane.key ? reveal : 0}
 				ongrow={() => !error && grow(lane.key)}
 			/>
 		{/each}
@@ -465,6 +590,7 @@
 
 <CardActions
 	target={menu}
+	{request}
 	{selection}
 	{progress}
 	onclose={() => (menu = null)}
