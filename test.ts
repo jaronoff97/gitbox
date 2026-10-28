@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, find_all, bounds, screenshot } from 'gpuix-svelte/test';
@@ -907,6 +907,33 @@ type('n e w');
 press('enter');
 await wait_for(() => turns().length === 4, { label: 'a new chat' });
 check('a new chat starts a new transcript', turns()[3].instructions !== undefined);
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+
+// History: each conversation is saved in chats/, newest first in the list; an old one opens with its
+// messages and resumes its transcript, and Delete removes both files.
+const chats_dir = join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'chats');
+const saved_chats = () =>
+	readdirSync(chats_dir)
+		.filter((f) => !f.endsWith('.fm.json'))
+		.map((f) => JSON.parse(readFileSync(join(chats_dir, f), 'utf8')) as { id: string; title: string; messages: unknown[] });
+const first_chat = saved_chats().find((c) => c.title === 'hi')!;
+check('both chats are saved, with their messages', saved_chats().length === 2 && first_chat.messages.length === 6);
+check('the list holds both, by their first message', has('hi') && has('new'));
+click_test_id(`chat-${first_chat.id}`);
+pump();
+check('a past chat opens with its messages', has('again') && replies().includes('You said again, turn 2'));
+click_test_id('chat-input');
+type('m o r e');
+press('enter');
+await wait_for(() => replies().includes('You said more, turn 4'), { label: 'a turn in a past chat' });
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+check('a past chat resumes its transcript', turns()[4].instructions === undefined);
+click_test_id(`chat-delete-${first_chat.id}`);
+pump();
+check(
+	'Delete removes a chat and its transcript',
+	saved_chats().length === 1 && !existsSync(join(chats_dir, `${first_chat.id}.fm.json`)) && !has('again')
+);
 process.env.FAKE_NO_FM = '1';
 press('ctrl-1');
 press('ctrl-3');
@@ -936,4 +963,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 120);
+finish('gitbox', 125);
