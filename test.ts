@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds, screenshot } from 'gpuix-svelte/test';
+import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, find_all, bounds, screenshot } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
@@ -87,9 +87,32 @@ require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: ${JSON.
 `,
 		{ mode: 0o755 }
 	);
+// A fake `fm` (Apple's on-device model, #chat): it echoes the prompt with the turn, which it keeps in
+// the transcript file, and logs the call with its instructions. FAKE_NO_FM makes the model missing.
+writeFileSync(
+	join(bin, 'fm'),
+	`#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
+if (args[0] === 'available') {
+	if (process.env.FAKE_NO_FM) { console.error('\\x1b[31mApple Intelligence is not enabled\\x1b[0m'); process.exit(1); }
+	console.log('System model available');
+} else if (args[0] === 'respond') {
+	const prompt = fs.readFileSync(0, 'utf8');
+	const turn = (opt('--resume') ? JSON.parse(fs.readFileSync(opt('--resume'), 'utf8')).turn : 0) + 1;
+	fs.writeFileSync(opt('--save-transcript'), JSON.stringify({ turn }));
+	fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'fm respond', stdin: prompt, instructions: opt('--instructions') }) + '\\n');
+	if (prompt === 'fail') { console.error('Error: \\x1b[31mThe model refused\\x1b[0m'); process.exit(1); }
+	process.stdout.write('You said ' + prompt + ', turn ' + turn);
+	console.error('Transcript saved to: ' + opt('--save-transcript'));
+}
+`,
+	{ mode: 0o755 }
+);
 process.env.FAKE_LOG = join(bin, 'calls.log');
 /** What the fake tools were asked to do, in order. */
-const calls = (): { cmd: string; stdin?: string }[] =>
+const calls = (): { cmd: string; stdin?: string; instructions?: string }[] =>
 	existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
 const called = (cmd: string) => calls().some((c) => c.cmd === cmd);
 const settings_filters = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8')).settings.filters.length;
@@ -844,6 +867,54 @@ check('an automation needs a condition', text().includes('Add a condition') && a
 click_test_id('automation-cancel');
 press('ctrl-1');
 
+// Chat: Apple's on-device model through fm. The first turn starts the transcript with the user and
+// their notifications as instructions; later turns resume it. The chat outlives a switch of tabs.
+const turns = () => calls().filter((c) => c.cmd === 'fm respond');
+/** The model's replies: markdown, which GPUI keeps as source rather than text. */
+const replies = () =>
+	find_all((n) => n.testId === 'chat-reply').map((n) => (n as { customProps?: { source?: string } }).customProps?.source);
+press('ctrl-3');
+await wait_for(() => !!find_test_id('chat-input'), { label: 'the model is ready' });
+click_test_id('chat-input');
+type('h i');
+press('enter');
+await wait_for(() => replies().includes('You said hi, turn 1'), { label: 'the first reply' });
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+check(
+	'the first turn sends the prompt, with the notifications as instructions',
+	turns()[0].stdin === 'hi' && !!turns()[0].instructions?.includes('The user is octocat') && !!turns()[0].instructions?.includes('"Note 1"')
+);
+type('a g a i n');
+press('enter');
+await wait_for(() => replies().includes('You said again, turn 2'), { label: 'the second reply' });
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+check('a later turn resumes the transcript', turns()[1].stdin === 'again' && turns()[1].instructions === undefined);
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-chat.png'));
+press('ctrl-1');
+press('ctrl-3');
+await wait_for(() => !!find_test_id('chat-input'), { label: 'the chat again' });
+check('the chat outlives a switch of tabs', has('hi') && has('again') && replies().length === 2);
+type('f a i l');
+press('enter');
+await wait_for(() => has('The model refused'), { label: 'an fm error' });
+await wait(50);
+check('an fm error shows in the chat, without its colours', has('The model refused'));
+click_test_id('chat-new');
+pump();
+check('New chat empties it', !has('again'));
+click_test_id('chat-input');
+type('n e w');
+press('enter');
+await wait_for(() => turns().length === 4, { label: 'a new chat' });
+check('a new chat starts a new transcript', turns()[3].instructions !== undefined);
+process.env.FAKE_NO_FM = '1';
+press('ctrl-1');
+press('ctrl-3');
+await wait_for(() => has('Apple Intelligence is not enabled'), { label: 'no model' });
+check('without the model, Chat says why', has('Chat needs macOS 27 or later, with Apple Intelligence on.'));
+delete process.env.FAKE_NO_FM;
+press('ctrl-1');
+
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
 	({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
@@ -865,4 +936,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 113);
+finish('gitbox', 120);

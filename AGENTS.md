@@ -138,6 +138,13 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 - `src/Automations.svelte` — the Automations tab: the list (with on/off switches) and its activity
   on the left, the editor on the right. A condition is a field from a menu, `is`, and a value, with
   GitHub's values as chips for the fields that have a fixed set. Edits are a copy until Save.
+- `src/fm.ts`, `src/Chat.svelte` — the Chat tab: Apple's on-device model through the `fm` CLI that
+  macOS 27 ships. `fm available` decides whether the tab offers a chat or says why not. A
+  conversation is a transcript file in the temp dir (`--save-transcript`, then `--resume`); its
+  first turn gives as instructions the user's login and their 20 newest unread notifications, as
+  the model's context is about 4,000 tokens. The prompt goes through stdin, and the reply streams
+  into a `<markdown>`. The chat is module state, so it outlives a switch of tabs. The model only
+  talks for now. The test puts a fake `fm` beside the fake `gh`.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.

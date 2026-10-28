@@ -2,6 +2,7 @@
 	import { set_css_vars } from 'gpuix-svelte';
 	import Automations from './src/Automations.svelte';
 	import Board from './src/Board.svelte';
+	import Chat from './src/Chat.svelte';
 	import { init as init_automations, watch } from './src/automations.svelte.ts';
 	import Onboarding from './src/Onboarding.svelte';
 	import { init, settings } from './src/settings.svelte.ts';
@@ -89,7 +90,7 @@
 					{#if view === 'automations'}
 						<Automations />
 					{:else}
-						<div class="header">Chat</div>
+						<Chat />
 					{/if}
 				</div>
 			{/if}
@@ -162,19 +163,6 @@
 		position: absolute;
 		inset: 0;
 		background-color: var(--bg);
-	}
-	.header {
-		display: flex;
-		align-items: center;
-		height: 52px;
-		flex-shrink: 0;
-		padding: 0px 16px;
-		border-bottom-width: 1px;
-		border-color: var(--separator);
-		background-color: var(--toolbar);
-		font-size: var(--text-title, 13px);
-		font-weight: bold;
-		color: var(--ink);
 	}
 	.app.center {
 		align-items: center;
