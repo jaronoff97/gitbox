@@ -3,11 +3,14 @@
 	import Tooltip from 'gpuix-svelte/components/Tooltip.svelte';
 	import { untrack } from 'svelte';
 	import Lane from './Lane.svelte';
+	import CardActions from './CardActions.svelte';
+	import Toast from './Toast.svelte';
 	import FilterBar from './FilterBar.svelte';
 	import FilterMenu from './FilterMenu.svelte';
 	import { matches, type Filter } from './filters.ts';
 	import Settings from './Settings.svelte';
-	import { notifications, PER_PAGE, viewer, type Notification } from './gh.ts';
+	import * as gh from './gh.ts';
+	import { notifications, PER_PAGE, viewer, type Action, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
 	import { settings, update, type Sort } from './settings.svelte.ts';
 
@@ -45,6 +48,55 @@
 	/** A refresh keeps the old cards on screen until its first pages land. */
 	let stale = $state(false);
 	let show_settings = $state(false);
+	let menu = $state<{ n: Notification; x: number; y: number } | null>(null);
+	let toasts = $state<{ id: number; text: string; error: boolean }[]>([]);
+	let toast_id = 0;
+
+	function toast(text: string, error = false) {
+		const id = ++toast_id;
+		toasts.push({ id, text, error });
+		setTimeout(() => (toasts = toasts.filter((t) => t.id !== id)), error ? 7000 : 3000);
+	}
+
+	type Change = Exclude<Action, 'open' | 'copy'>;
+	/** Each action that changes GitHub: its gh call, the toast when it works, and the verb when it fails. */
+	const ACTIONS: Record<Change, { run: (n: Notification, body?: string) => Promise<unknown>; done: string; verb: string }> = {
+		read: { run: gh.mark_read, done: 'Marked as read', verb: 'mark as read' },
+		done: { run: gh.mark_done, done: 'Marked as done', verb: 'mark as done' },
+		unsubscribe: { run: gh.unsubscribe, done: 'Unsubscribed', verb: 'unsubscribe' },
+		close: { run: (n) => gh.set_state(n, 'closed'), done: 'Closed', verb: 'close' },
+		'close-not-planned': { run: (n) => gh.set_state(n, 'closed', 'not planned'), done: 'Closed as not planned', verb: 'close' },
+		reopen: { run: (n) => gh.set_state(n, 'open'), done: 'Reopened', verb: 'reopen' },
+		comment: { run: (n, body) => gh.comment(n, body ?? ''), done: 'Comment posted', verb: 'post the comment' }
+	};
+
+	/** Runs a card action: the board changes at once, and changes back if gh fails. */
+	async function act(action: Action, n: Notification, body?: string): Promise<boolean> {
+		try {
+			if (action === 'open') return (gh.open_url(await gh.link(n)), true);
+			if (action === 'copy') return (await gh.copy(await gh.link(n)), toast('Link copied'), true);
+		} catch (e) {
+			return (toast((e as Error).message, true), false);
+		}
+		const at = items.indexOf(n);
+		const before = { unread: n.unread, state: n.state };
+		// Read stays on the board only while it shows read notifications.
+		const remove = action === 'done' || action === 'unsubscribe' || (action === 'read' && !settings.include_read);
+		if (remove && at >= 0) items.splice(at, 1);
+		else if (action === 'read') n.unread = false;
+		else if (action === 'close' || action === 'close-not-planned') n.state = 'CLOSED';
+		else if (action === 'reopen') n.state = 'OPEN';
+		try {
+			await ACTIONS[action].run(n, body);
+			toast(ACTIONS[action].done);
+			return true;
+		} catch (e) {
+			if (remove && at >= 0) items.splice(Math.min(at, items.length), 0, n);
+			else Object.assign(n, before);
+			toast(`Could not ${ACTIONS[action].verb}: ${(e as Error).message}`, true);
+			return false;
+		}
+	}
 	let me = $state<{ login: string; avatar_url: string } | null>(null);
 
 	viewer().then((v) => (me = v), () => {});
@@ -238,11 +290,15 @@
 				sort={lane.sort}
 				reset={`${epoch}:${lane.sort}`}
 				onsort={() => flip(lane.key)}
+				onmenu={(n, x, y) => (menu = { n, x, y })}
 				ongrow={() => !error && grow(lane.key)}
 			/>
 		{/each}
 	</div>
 </div>
+
+<CardActions target={menu} onclose={() => (menu = null)} onrun={act} />
+<Toast {toasts} />
 
 {#if show_settings}
 	<Settings login={me?.login ?? ''} onclose={() => (show_settings = false)} {onsetup} />

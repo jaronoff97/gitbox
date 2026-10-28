@@ -1,10 +1,21 @@
 <script lang="ts">
-	import type { GpuixEvent } from 'gpuix-svelte';
+	import { get_native, type GpuixEvent, type ShadowNode } from 'gpuix-svelte';
 	import { words } from './filters.ts';
 	import { link, open_url, type Notification } from './gh.ts';
 	import { subject_icon } from './icons.ts';
 
-	let { n }: { n: Notification } = $props();
+	/** `onmenu` opens the context menu at window coordinates (#2). */
+	let { n, onmenu }: { n: Notification; onmenu: (x: number, y: number) => void } = $props();
+	let el: ShadowNode | null = null;
+
+	/** Shift+F10 opens the menu from the keyboard, near the card's top left. */
+	function key(e: GpuixEvent) {
+		if (e.key === 'enter') open();
+		else if (e.key === 'f10' && e.modifiers?.shift) {
+			const b = el?.nativeId == null ? null : get_native()?.getElementBounds(el.nativeId);
+			if (b) onmenu(b.x + 24, b.y + 24);
+		}
+	}
 
 	let subject = $derived(subject_icon(n));
 
@@ -29,7 +40,9 @@
 	hitbox="self"
 	tabindex={0}
 	onclick={open}
-	onkeydown={(e: GpuixEvent) => e.key === 'enter' && open()}
+	onauxclick={(e: GpuixEvent) => e.isRightClick && onmenu(e.x ?? 0, e.y ?? 0)}
+	onkeydown={key}
+	{@attach (node: ShadowNode) => (el = node)}
 >
 	<div class="top">
 		{#if n.repository.owner?.avatar_url}

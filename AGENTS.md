@@ -120,6 +120,12 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   `onvisiblerange`). GPUI paints the thumb; a strip over it scrolls with `scrollToItem` when dragged.
   GPUI reports no visible range after `scrollToItem`, so a jump moves the window itself. Headless,
   a list draws a wheel scroll only on a later frame, so tests wheel in steps and pump.
+- `src/CardActions.svelte` — a card's context menu (right click, or Shift+F10 on a focused card) and
+  its two dialogs: Close asks first, Comment takes the text. `act()` in `Board.svelte` runs the
+  action: the board changes at once and changes back, with a toast, if `gh` fails. The `gh` calls
+  (`mark_read`, `mark_done`, `unsubscribe`, `set_state`, `comment`, `copy`) are in `src/gh.ts`;
+  a comment goes to `gh` through stdin.
+- `src/Toast.svelte` — short messages at the bottom of the window.
 - `src/Card.svelte` — one notification; a click or Enter opens `link(n)` in the browser: the PR or
   issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
   the subject's API object names.
@@ -128,8 +134,9 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 - `assets/icon.svg`, `assets/icon.png` — the app icon and its 1024 px render (see `build.ts`).
 - `test.ts` — the headless test (`gpuix-svelte/test`); a plain script that exits 1 on failure. It
   puts a fake `gh` first on `PATH` and points `XDG_CONFIG_HOME` at a temp dir, so it needs no
-  GitHub account and leaves the real saved state alone. It never clicks a card, which would open
-  a browser.
+  GitHub account and leaves the real saved state alone. A fake `open` and `pbcopy` sit beside it,
+  and every action call goes to a log the test reads (`calls()`), so no browser opens and the
+  clipboard stays as it was.
 - `standalone.ts`, `build.ts` — the entry and the Bun build script behind `npm run build`; on
   macOS it also makes `dist/Gitbox.app` and a `.dmg`, signed from `CODESIGN_IDENTITY`.
 - `.github/workflows/release.yml` — a `v*` tag builds the `.dmg` and attaches it to a release.

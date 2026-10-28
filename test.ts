@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click_test_id, all_text, check, drag, finish, press, pump, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
+import { mount_headless, click_test_id, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { link, type Notification } from './src/gh.ts';
@@ -46,6 +46,11 @@ else if (page) {
 	console.log(JSON.stringify([[{ summary: 'Bad thing', html_url: 'https://github.com/octo/repo/security/advisories/GHSA-1' }]]));
 } else if (cmd === 'api https://api.github.com/repos/octo/repo/releases/1 --jq .html_url') {
 	console.log('https://github.com/octo/repo/releases/tag/v1');
+} else if ((cmd.startsWith('api -X ') && cmd.includes(' notifications/threads/')) || /^(pr|issue) (close|reopen|comment) /.test(cmd)) {
+	// Card actions (#2): logged for the test to read; thread 12 refuses to be marked done.
+	const stdin = cmd.includes('--body-file -') ? require('fs').readFileSync(0, 'utf8') : undefined;
+	require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd, stdin }) + '\\n');
+	if (cmd === 'api -X DELETE notifications/threads/12') { console.error('HTTP 403: Forbidden'); process.exit(1); }
 } else if (args[1] === 'graphql') {
 	const data = {};
 	for (const [, alias, i] of args[3].matchAll(/(a\\d+): resource\\(url: "[^"]*\\/pull\\/(\\d+)"\\)/g))
@@ -62,6 +67,21 @@ else if (page) {
 `,
 	{ mode: 0o755 }
 );
+// A fake `open` and `pbcopy` too, so the test opens no browser and leaves the clipboard alone.
+for (const tool of ['open', 'pbcopy'])
+	writeFileSync(
+		join(bin, tool),
+		`#!${process.execPath}
+const stdin = ${JSON.stringify(tool)} === 'pbcopy' ? require('fs').readFileSync(0, 'utf8') : undefined;
+require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: ${JSON.stringify(tool)} + ' ' + process.argv.slice(2).join(' '), stdin }) + '\\n');
+`,
+		{ mode: 0o755 }
+	);
+process.env.FAKE_LOG = join(bin, 'calls.log');
+/** What the fake tools were asked to do, in order. */
+const calls = (): { cmd: string; stdin?: string }[] =>
+	existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+const called = (cmd: string) => calls().some((c) => c.cmd === cmd);
 process.env.PATH = `${bin}:${process.env.PATH}`;
 // The saved state goes to a temp dir, not the real ~/.config/gitbox.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'gitbox-config-'));
@@ -207,6 +227,75 @@ check(
 check('a sort changes only its own lane', has('Note 2') && has('Note 4'));
 check('the sort is saved', saved().settings.lane_sort.waiting === 'asc');
 
+// Card actions (#2): a right click opens the menu at the card.
+const right_click = async (id: number) => {
+	click_test_id(`card-${id}`, { button: 2 });
+	await wait_for(() => has('Mark as Done'), { label: `the menu of card ${id}` });
+};
+await right_click(4);
+check(
+	'the menu of an open PR offers its actions',
+	['Open in Browser', 'Copy Link', 'Mark as Read', 'Mark as Done', 'Unsubscribe', 'Comment…', 'Close pull request…'].every(has) &&
+		!has('Reopen pull request')
+);
+click_test_id('menu-open');
+await wait_for(() => called('open https://github.com/octo/repo/pull/4'), { label: 'open in the browser' });
+check('Open in Browser opens the PR', !has('Mark as Done'));
+
+await right_click(4);
+click_test_id('menu-copy');
+await wait_for(() => text().includes('Link copied'), { label: 'copy link' });
+check('Copy Link puts the link on the clipboard', calls().some((c) => c.cmd === 'pbcopy ' && c.stdin === 'https://github.com/octo/repo/pull/4'));
+
+await right_click(8);
+click_test_id('menu-done');
+await wait_for(() => !find_test_id('card-8'), { label: 'card 8 leaves at once' });
+await wait_for(() => called('api -X DELETE notifications/threads/8') && text().includes('Marked as done'), { label: 'mark done' });
+check('Mark as Done removes the card and tells GitHub', !find_test_id('card-8'));
+
+await right_click(12);
+click_test_id('menu-done');
+await wait_for(() => text().includes('Could not mark as done: HTTP 403: Forbidden'), { label: 'a refused action' });
+check('a refused action puts the card back and says why', find_test_id('card-12') !== null);
+
+await right_click(24);
+click_test_id('menu-read');
+await wait_for(() => called('api -X PATCH notifications/threads/24'), { label: 'mark read' });
+check('Mark as Read drops the card while read ones are hidden', !find_test_id('card-24'));
+
+await right_click(20);
+click_test_id('menu-unsubscribe');
+await wait_for(() => called('api -X DELETE notifications/threads/20'), { label: 'unsubscribe' });
+check('Unsubscribe mutes the thread, then marks it done', called('api -X PUT notifications/threads/20/subscription -F ignored=true') && !find_test_id('card-20'));
+
+await right_click(16);
+click_test_id('menu-close');
+await wait_for(() => has('Close this pull request?'), { label: 'the close confirmation' });
+check('Close asks first', !called('pr close https://github.com/octo/repo/pull/16'));
+click_test_id('confirm-close');
+await wait_for(() => called('pr close https://github.com/octo/repo/pull/16'), { label: 'close' });
+await wait_for(() => in_lane(16, 'done'), { label: 'the closed PR moves lanes' });
+check('a closed PR moves to Merged / Closed', in_lane(16, 'done'));
+await right_click(16);
+check('a closed PR offers Reopen', has('Reopen pull request') && !has('Close pull request…'));
+click_test_id('menu-reopen');
+await wait_for(() => called('pr reopen https://github.com/octo/repo/pull/16') && in_lane(16, 'requested'), { label: 'reopen' });
+
+await right_click(4);
+click_test_id('menu-comment');
+await wait_for(() => has('Comment on octo/repo #4'), { label: 'the comment dialog' });
+// Quotes and a line break would break a command line; through stdin they arrive as typed. (The test
+// keyboard types shift-' as ', not ".)
+type("h i space ' a ' enter b");
+await wait(50);
+click_test_id('comment-send');
+await wait_for(() => called('pr comment https://github.com/octo/repo/pull/4 --body-file -'), { label: 'comment' });
+check(
+	'a comment reaches gh unchanged, through stdin',
+	calls().find((c) => c.cmd.startsWith('pr comment'))?.stdin === "hi 'a'\nb"
+);
+await wait_for(() => !has('Comment on octo/repo #4'), { label: 'the dialog closes after sending' });
+
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
@@ -268,4 +357,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 38);
+finish('gitbox', 49);
