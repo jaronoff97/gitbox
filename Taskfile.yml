@@ -1,0 +1,23 @@
+version: '3'
+
+tasks:
+  install:
+    cmds: [bun install]
+    sources: [package.json]
+    generates: [bun.lock]
+
+  start:
+    deps: [install]
+    cmds: [bun run start]
+
+  test:
+    deps: [install]
+    cmds: [bun run test]
+
+  typecheck:
+    deps: [install]
+    cmds: [bun run typecheck]
+
+  build:
+    deps: [install]
+    cmds: [bun run build]
