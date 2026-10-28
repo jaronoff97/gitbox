@@ -84,15 +84,20 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 ## Files
 
 - `app.ts` — the entry: `render_hot` opens the window and remounts `App.svelte` on save. On macOS
-  the title bar is transparent (`titlebarTransparent`), so the board's 52 px toolbar is the title bar
-  and the traffic lights sit in it; `standalone.ts` has the same options.
+  the title bar is transparent (`titlebarTransparent`), so the top 52 px of the sidebar and the
+  toolbar are the title bar, and the traffic lights sit atop the sidebar; `standalone.ts` has the
+  same options.
 - `dev.ts` — what `npm start` runs: `app.ts` as the gpuix-svelte bin would, but on macOS from a hard
   link to the runtime inside `dist/dev/Gitbox Dev.app`, so the Dock and menu bar show "Gitbox Dev"
   with the icon inverted (rendered from `assets/icon.svg` through an SVG colour filter) rather than
   "bun" or "node". `npm run build` deletes `dist/`; the next start makes it again.
 - `bundle.ts` — the macOS `.app` wrapper (`Info.plist`, `.icns` from `assets/icon.png`) that
   `dev.ts` and `build.ts` share.
-- `App.svelte` — the root component: the palette, then onboarding until it passes, then the board.
+- `App.svelte` — the root component: the palette, then onboarding until it passes, then a sidebar
+  with three tabs (Inbox, Automations, Chat; ⌃1–⌃3). The board stays mounted while another tab
+  covers it (`active={false}` hides it with `visibility: hidden` and rests its keys), so its cards
+  and scroll survive a switch. `--sidebar` is the sidebar's width; toasts and the selection bar
+  centre beside it.
 - `src/gh.ts` — every call to the `gh` CLI, the onboarding checks, and `open_url`. Each page of
   notifications gets its PRs' and issues' state, draft flag, author, labels and reviews from one
   batched GraphQL call (GraphQL has no notifications; `reviewDecision` is left out, as it made a

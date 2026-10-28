@@ -18,11 +18,9 @@
 	import { gear, sync } from './icons.ts';
 	import { LANE_TITLES, lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
 
-	/** On macOS the toolbar is the title bar (app.ts makes it transparent) and leaves room for the traffic lights. */
-	const MAC = process.platform === 'darwin';
-
-	/** Back to onboarding, for when gh stops working after setup (a logout, say). */
-	let { onsetup }: { onsetup: () => void } = $props();
+	/** Back to onboarding, for when gh stops working after setup (a logout, say). `active`: the
+	 * sidebar's Inbox tab is open; when it isn't, the board stays loaded but hidden, and its keys rest. */
+	let { active = true, onsetup }: { active?: boolean; onsetup: () => void } = $props();
 
 	const LANES = [
 		{ key: 'todo', title: LANE_TITLES.todo, tone: 'muted' },
@@ -400,7 +398,7 @@
 	});
 
 	/** A dialog or menu is open: board keys (Escape, ⌘A, ⌘↩) leave it alone. */
-	const modal = () => dialog || menu !== null || filters_open || show_settings || show_shortcuts;
+	const modal = () => !active || dialog || menu !== null || filters_open || show_settings || show_shortcuts;
 
 	// The board's commands (#4): the keys, the ⌘/ overlay, the palette and the menu bar read them.
 	$effect(() =>
@@ -524,10 +522,10 @@
 
 </script>
 
-<div class="page">
-	<div class="toolbar" class:mac={MAC}>
+<div class="page" class:hidden={!active}>
+	<div class="toolbar">
 		<div class="titles">
-			<div class="title">Gitbox</div>
+			<div class="title">Inbox</div>
 			<div class="subtitle">
 				{items.length}{more ? '+' : ''} {settings.include_read ? 'notifications' : 'unread'}{loading ? ' · loading…' : ''}
 			</div>
@@ -634,6 +632,9 @@
 		width: 100%;
 		height: 100%;
 	}
+	.page.hidden {
+		visibility: hidden;
+	}
 	.toolbar {
 		display: flex;
 		align-items: center;
@@ -645,10 +646,6 @@
 		border-color: var(--separator);
 		background-color: var(--toolbar);
 		user-select: none;
-	}
-	.toolbar.mac {
-		/* The traffic lights (app.ts places them at x 20) and the gap after them. */
-		padding-left: 92px;
 	}
 	.titles {
 		display: flex;

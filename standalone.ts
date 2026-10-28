@@ -6,11 +6,11 @@ import App from './App.svelte';
 render(App, {
 	title: 'Gitbox',
 	appName: 'Gitbox',
-	width: 1280,
+	width: 1470,
 	height: 800,
-	minWidth: 960,
+	minWidth: 1150,
 	minHeight: 560,
-	// On macOS the board's toolbar is the title bar, with the traffic lights centred in its 52 px.
+	// On macOS the sidebar and the toolbar are the title bar, with the traffic lights centred in its 52 px.
 	titlebarTransparent: process.platform === 'darwin',
 	trafficLightX: 20,
 	trafficLightY: 19

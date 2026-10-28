@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
+import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds, screenshot } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
@@ -122,7 +122,7 @@ async function scroll_lane(key: string, steps = 10) {
 	pump();
 }
 
-let app = mount_headless(App, { width: 1280, height: 800 });
+let app = mount_headless(App, { width: 1470, height: 800 });
 
 await wait_for(() => text().includes('gh auth login'), { label: 'sign-in hint' });
 check('a signed-out gh shows the login hint', text().includes('not logged in'));
@@ -720,7 +720,7 @@ press('escape');
 await wait_for(() => !dialog_open(), { label: 'Escape closes settings again' });
 
 await app.unmount();
-app = mount_headless(App, { width: 1280, height: 800 });
+app = mount_headless(App, { width: 1470, height: 800 });
 await wait_for(() => has('Note 2'), { label: 'the board after a restart' });
 check('a restart skips onboarding', !text().includes('Welcome to gitbox'));
 // With lanes of 25, the start alone loads one batch; oldest first has to load the last page too.
@@ -752,6 +752,24 @@ press('enter');
 await wait_for(() => has('Todo'), { label: '↩ shows the board' });
 check('onboarding works from the keyboard', saved().onboarded === true);
 
+// The sidebar: Automations and Chat cover the board, which stays loaded behind them, keys and all.
+await wait_for(() => !!find_test_id('card-4'), { label: 'the board again' });
+click_test_id('nav-automations');
+pump();
+const calls_before = calls().length;
+press('enter');
+await wait(100);
+check('Automations hides the board and rests its keys', badges('Automations') === 2 && !bounds(find_test_id('card-4')!) && calls().length === calls_before);
+if (process.env.SHOT) screenshot(process.env.SHOT);
+press('ctrl-3');
+pump();
+check('ctrl-3 opens Chat', badges('Chat') === 2 && badges('Automations') === 1);
+press('ctrl-1');
+pump();
+click(find_test_id('card-4')!);
+await wait_for(() => calls().length > calls_before, { label: 'a card opens again' });
+check('the board is back as it was', badges('50+') === 4);
+
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
 	({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
@@ -773,4 +791,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 99);
+finish('gitbox', 102);
