@@ -9,11 +9,14 @@
 	let {
 		target,
 		onclose,
-		onrun
+		onrun,
+		ondialog
 	}: {
 		target: { n: Notification; x: number; y: number } | null;
 		onclose: () => void;
 		onrun: (action: Action, n: Notification, body?: string) => Promise<boolean>;
+		/** Whether a dialog is open, so the board leaves its keys (⌘↩) to it. */
+		ondialog: (open: boolean) => void;
 	} = $props();
 
 	let confirming = $state<Notification | null>(null);
@@ -48,6 +51,8 @@
 		sending = false;
 		if (ok) writing = null;
 	}
+
+	$effect(() => ondialog(confirming !== null || writing !== null));
 
 	// Escape closes a dialog; Enter confirms a close; ⌘↩ sends a comment.
 	$effect(() => {

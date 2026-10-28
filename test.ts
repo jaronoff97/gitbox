@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click_test_id, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
+import { mount_headless, click, click_test_id, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { link, type Notification } from './src/gh.ts';
@@ -51,6 +51,8 @@ else if (page) {
 	const stdin = cmd.includes('--body-file -') ? require('fs').readFileSync(0, 'utf8') : undefined;
 	require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd, stdin }) + '\\n');
 	if (cmd === 'api -X DELETE notifications/threads/12') { console.error('HTTP 403: Forbidden'); process.exit(1); }
+	// As gh does, a new comment's URL on stdout.
+	if (cmd.startsWith('pr comment')) console.log('https://github.com/octo/repo/pull/4#issuecomment-1');
 } else if (args[1] === 'graphql') {
 	const data = {};
 	for (const [, alias, i] of args[3].matchAll(/(a\\d+): resource\\(url: "[^"]*\\/pull\\/(\\d+)"\\)/g))
@@ -252,6 +254,10 @@ click_test_id('menu-done');
 await wait_for(() => !find_test_id('card-8'), { label: 'card 8 leaves at once' });
 await wait_for(() => called('api -X DELETE notifications/threads/8') && text().includes('Marked as done'), { label: 'mark done' });
 check('Mark as Done removes the card and tells GitHub', !find_test_id('card-8'));
+check('the toast offers ⌘↩ to open what the action touched', has('⌘↩') && has('Open'));
+press('cmd-enter');
+await wait_for(() => called('open https://github.com/octo/repo/pull/8'), { label: '⌘↩ after done' });
+check('⌘↩ opens the PR the action touched', called('open https://github.com/octo/repo/pull/8'));
 
 await right_click(12);
 click_test_id('menu-done');
@@ -280,6 +286,9 @@ await right_click(16);
 check('a closed PR offers Reopen', has('Reopen pull request') && !has('Close pull request…'));
 click_test_id('menu-reopen');
 await wait_for(() => called('pr reopen https://github.com/octo/repo/pull/16') && in_lane(16, 'requested'), { label: 'reopen' });
+click(find_test_id('toast-open', { last: true })!);
+await wait_for(() => called('open https://github.com/octo/repo/pull/16'), { label: 'a click on the toast' });
+check('a click on the toast opens its page', called('open https://github.com/octo/repo/pull/16'));
 
 await right_click(4);
 click_test_id('menu-comment');
@@ -288,13 +297,19 @@ await wait_for(() => has('Comment on octo/repo #4'), { label: 'the comment dialo
 // keyboard types shift-' as ', not ".)
 type("h i space ' a ' enter b");
 await wait(50);
-click_test_id('comment-send');
+// ⌘↩ in the text field sends; it must not also open an older toast's page.
+const opens = calls().filter((c) => c.cmd.startsWith('open ')).length;
+press('cmd-enter');
 await wait_for(() => called('pr comment https://github.com/octo/repo/pull/4 --body-file -'), { label: 'comment' });
+check('⌘↩ in the comment field sends, and opens nothing', calls().filter((c) => c.cmd.startsWith('open ')).length === opens);
 check(
 	'a comment reaches gh unchanged, through stdin',
 	calls().find((c) => c.cmd.startsWith('pr comment'))?.stdin === "hi 'a'\nb"
 );
 await wait_for(() => !has('Comment on octo/repo #4'), { label: 'the dialog closes after sending' });
+press('cmd-enter');
+await wait_for(() => called('open https://github.com/octo/repo/pull/4#issuecomment-1'), { label: '⌘↩ after a comment' });
+check('⌘↩ after a comment opens the new comment', called('open https://github.com/octo/repo/pull/4#issuecomment-1'));
 
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
@@ -357,4 +372,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 49);
+finish('gitbox', 54);

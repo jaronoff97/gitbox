@@ -49,13 +49,25 @@
 	let stale = $state(false);
 	let show_settings = $state(false);
 	let menu = $state<{ n: Notification; x: number; y: number } | null>(null);
-	let toasts = $state<{ id: number; text: string; error: boolean }[]>([]);
+	/** A card action's dialog is open: ⌘↩ is its key then (the comment dialog sends with it). */
+	let dialog = $state(false);
+	type Note = { id: number; text: string; error: boolean; open?: () => void };
+	let toasts = $state<Note[]>([]);
 	let toast_id = 0;
 
-	function toast(text: string, error = false) {
+	/** Shows `text`; with `open`, the toast offers ⌘↩ (or a click) to open what the action touched. */
+	function toast(text: string, error = false, open?: () => void) {
 		const id = ++toast_id;
-		toasts.push({ id, text, error });
-		setTimeout(() => (toasts = toasts.filter((t) => t.id !== id)), error ? 7000 : 3000);
+		toasts.push({ id, text, error, open });
+		setTimeout(() => dismiss(id), error ? 7000 : open ? 6000 : 3000);
+	}
+	const dismiss = (id: number) => (toasts = toasts.filter((t) => t.id !== id));
+
+	/** ⌘↩: opens what the newest toast that can still open points at, and closes that toast. */
+	function open_toast(t = toasts.findLast((t) => t.open)) {
+		if (!t?.open) return;
+		t.open();
+		dismiss(t.id);
 	}
 
 	type Change = Exclude<Action, 'open' | 'copy'>;
@@ -74,7 +86,11 @@
 	async function act(action: Action, n: Notification, body?: string): Promise<boolean> {
 		try {
 			if (action === 'open') return (gh.open_url(await gh.link(n)), true);
-			if (action === 'copy') return (await gh.copy(await gh.link(n)), toast('Link copied'), true);
+			if (action === 'copy') {
+				const url = await gh.link(n);
+				await gh.copy(url);
+				return (toast('Link copied', false, () => gh.open_url(url)), true);
+			}
 		} catch (e) {
 			return (toast((e as Error).message, true), false);
 		}
@@ -87,8 +103,10 @@
 		else if (action === 'close' || action === 'close-not-planned') n.state = 'CLOSED';
 		else if (action === 'reopen') n.state = 'OPEN';
 		try {
-			await ACTIONS[action].run(n, body);
-			toast(ACTIONS[action].done);
+			const out = await ACTIONS[action].run(n, body);
+			// gh prints a new comment's URL; anything else opens the PR or issue.
+			const url = typeof out === 'string' ? out.match(/https:\/\/\S+/)?.[0] : undefined;
+			toast(ACTIONS[action].done, false, () => (url ? gh.open_url(url) : void gh.link(n).then(gh.open_url)));
 			return true;
 		} catch (e) {
 			if (remove && at >= 0) items.splice(Math.min(at, items.length), 0, n);
@@ -217,7 +235,9 @@
 	$effect(() =>
 		on_window_key('keydown', (e) => {
 			if (!e.modifiers?.cmd) return;
-			if (e.key === 'r') start();
+			// In a dialog or a text field, ⌘↩ belongs to them.
+			if (e.key === 'enter' && !dialog && !e.editing) open_toast();
+			else if (e.key === 'r') start();
 			else if (e.key === ',') show_settings = true;
 		})
 	);
@@ -297,8 +317,8 @@
 	</div>
 </div>
 
-<CardActions target={menu} onclose={() => (menu = null)} onrun={act} />
-<Toast {toasts} />
+<CardActions target={menu} onclose={() => (menu = null)} onrun={act} ondialog={(open) => (dialog = open)} />
+<Toast {toasts} onopen={open_toast} />
 
 {#if show_settings}
 	<Settings login={me?.login ?? ''} onclose={() => (show_settings = false)} {onsetup} />
