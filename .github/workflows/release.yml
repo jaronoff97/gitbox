@@ -1,11 +1,16 @@
-# Push a tag such as v0.1.0 to build the macOS app and attach its .dmg to a GitHub release.
-# The app is signed ad hoc unless the CODESIGN_IDENTITY / NOTARY_PROFILE setup in build.ts is
-# added here (a certificate imported into the runner's keychain, and a notarytool profile).
+# Push a tag such as v0.1.0 (matching package.json's version) to build the macOS app and attach its
+# .dmg to a GitHub release. Run it by hand (Actions → release → Run workflow, or
+# `gh workflow run release.yml`) for a dry run: the same build, with the .dmg kept as a run
+# artifact and no release.
+#
+# The app is signed ad hoc unless the CODESIGN_IDENTITY / NOTARY_PROFILE setup in build.ts is added
+# here (a certificate imported into the runner's keychain, and a notarytool profile).
 name: release
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,10 +23,27 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - name: Check the tag matches package.json
+        if: github.ref_type == 'tag'
+        run: |
+          version="v$(bun -e 'console.log(require("./package.json").version)')"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json ($version)"
+            exit 1
+          fi
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      - run: bun run test
       - run: bun run build
+      - name: Keep the .dmg (dry run)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitbox-dmg
+          path: dist/*.dmg
+          retention-days: 7
       - name: Release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.dmg --title "gitbox $GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/*.dmg --title "Gitbox $GITHUB_REF_NAME" --generate-notes

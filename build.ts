@@ -10,6 +10,7 @@
 // be allowed under System Settings → Privacy & Security.
 
 import type { BunPlugin } from 'bun';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { load_module, load_svelte, resolve_native_cjs, resolve_svelte } from 'gpuix-svelte/plugin';
 import { run, write_bundle } from './bundle.ts';
@@ -121,7 +122,16 @@ function dmg(app: string, out: string) {
 	mkdirSync(stage);
 	run('ditto', [app, `${stage}/Gitbox.app`]);
 	symlinkSync('/Applications', `${stage}/Applications`);
-	run('hdiutil', ['create', '-volname', 'Gitbox', '-srcfolder', stage, '-ov', '-format', 'UDZO', out]);
+	// GitHub's macOS runners sometimes answer "Resource busy" while a disk image is still detaching.
+	const args = ['create', '-volname', 'Gitbox', '-srcfolder', stage, '-ov', '-format', 'UDZO', out];
+	for (let attempt = 1; spawnSync('hdiutil', args, { stdio: 'inherit' }).status !== 0; attempt++) {
+		if (attempt === 5) {
+			console.error('hdiutil create failed 5 times');
+			process.exit(1);
+		}
+		console.log(`hdiutil create failed; trying again (${attempt})`);
+		spawnSync('sleep', ['3']);
+	}
 	rmSync(stage, { recursive: true });
 	if (identity) run('codesign', ['--force', '--sign', identity, out]);
 	console.log(`packed ${out}`);
