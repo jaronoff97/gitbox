@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { get_native, on_window_key, type GpuixEvent, type ShadowNode } from 'gpuix-svelte';
+	import { on_window_key } from 'gpuix-svelte';
 	import { untrack } from 'svelte';
-	import Card from './Card.svelte';
+	import Lane from './Lane.svelte';
 	import FilterBar from './FilterBar.svelte';
 	import { matches, type Filter } from './filters.ts';
 	import Settings from './Settings.svelte';
@@ -87,9 +87,16 @@
 		}
 	}
 
-	const reset_targets = () => (target = Object.fromEntries(LANES.map((l) => [l.key, settings.lane_size])));
+	/** Bumped with every start-over, so each lane scrolls back to its top. */
+	let epoch = $state(0);
+	function reset_targets() {
+		target = Object.fromEntries(LANES.map((l) => [l.key, settings.lane_size]));
+		epoch++;
+	}
 
-	/** `lane_size` more cards in lane `key`: at once if they are loaded, else as pages arrive. */
+	/** `lane_size` more cards in lane `key`: at once if they are loaded, else as pages arrive.
+	 * ponytail: the API cannot filter by lane, so growing a sparse lane (Todo, say) can fetch every
+	 * page before it finds enough cards; they show as each page arrives. */
 	function grow(key: string) {
 		target[key] = (lanes.find((l) => l.key === key)?.cards.length ?? 0) + settings.lane_size;
 		fill();
@@ -144,31 +151,15 @@
 		})
 	);
 
-	// A lane grows only when you scroll down in it near its end: within 200 px of the lane's
-	// bottom, measured on its card column (the end marker's parent). The column's top is always on
-	// screen, so its painted bounds stay current; an off-screen marker keeps the bounds of its last
-	// paint. A short lane is always near its end, so a scroll there grows it too.
-	// ponytail: the API cannot filter by lane, so growing a sparse lane (Todo, say) can fetch every
-	// page before it finds enough cards; they show as each page arrives.
-	const lane_nodes: Record<string, ShadowNode> = {};
-	const ends: Record<string, ShadowNode> = {};
-	function near_end(key: string) {
-		const native = get_native();
-		const lane = lane_nodes[key]?.nativeId;
-		const column = ends[key]?.parent?.nativeId;
-		if (!native || lane == null || column == null) return false;
-		const l = native.getElementBounds(lane);
-		const c = native.getElementBounds(column);
-		return !!l && !!c && c.y + c.height < l.y + l.height + 200;
-	}
-
-	// `scroll` is wheel input (negative is down). The check waits 100 ms for the scroll to paint.
-	function on_wheel(key: string, e: GpuixEvent) {
-		if ((e.deltaY ?? 0) >= 0) return;
-		setTimeout(() => {
-			if (!error && near_end(key)) grow(key);
-		}, 100);
-	}
+	/** The end marker's text for a lane. */
+	const status = (lane: (typeof lanes)[number]) =>
+		loading && (stale || lane.loaded < lane.target)
+			? 'Loading…'
+			: more || lane.loaded > lane.cards.length
+				? 'Scroll for more'
+				: lane.cards.length
+					? 'All caught up'
+					: 'Nothing here';
 
 </script>
 
@@ -206,35 +197,16 @@
 
 	<div class="board">
 		{#each lanes as lane (lane.key)}
-			<div
-				class="lane"
-				testId="lane-{lane.key}"
-				onscroll={(e: GpuixEvent) => on_wheel(lane.key, e)}
-				{@attach (node: ShadowNode) => (lane_nodes[lane.key] = node)}
-			>
-				<div class="lane-head">
-					<div class="dot" style="background-color: var(--{lane.tone})"></div>
-					<div class="lane-title">{lane.title}</div>
-					<div class="badge">{lane.cards.length}{more || lane.loaded > lane.cards.length ? '+' : ''}</div>
-				</div>
-				<!-- GPUI paints this thumb in the same frame as the scroll; Scroller's own thumb trails it. -->
-				<div class="scroll">
-					<div class="column">
-						{#each lane.cards as n (n.id)}
-							<Card {n} />
-						{/each}
-						<div class="end" {@attach (node: ShadowNode) => (ends[lane.key] = node)}>
-							{#if loading && (stale || lane.loaded < lane.target)}
-								Loading…
-							{:else if more || lane.loaded > lane.cards.length}
-								Scroll for more
-							{:else}
-								{lane.cards.length ? 'All caught up' : 'Nothing here'}
-							{/if}
-						</div>
-					</div>
-				</div>
-			</div>
+			<Lane
+				key={lane.key}
+				title={lane.title}
+				tone={lane.tone}
+				cards={lane.cards}
+				badge={`${lane.cards.length}${more || lane.loaded > lane.cards.length ? '+' : ''}`}
+				status={status(lane)}
+				reset={epoch}
+				ongrow={() => !error && grow(lane.key)}
+			/>
 		{/each}
 	</div>
 </div>
@@ -347,62 +319,5 @@
 		min-height: 0;
 		gap: 12px;
 		padding: 12px 12px 0px 12px;
-	}
-	.lane {
-		display: flex;
-		flex-direction: column;
-		flex-grow: 1;
-		flex-basis: 0;
-		min-width: 0;
-		gap: 10px;
-		padding: 12px 4px 0px 10px;
-		border-radius: 12px 12px 0px 0px;
-		background-color: var(--lane);
-	}
-	.lane-head {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 0px 2px;
-	}
-	.dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 4px;
-	}
-	.lane-title {
-		font-size: 13px;
-		font-weight: semibold;
-		color: var(--ink);
-	}
-	.badge {
-		padding: 0px 7px;
-		border-radius: 9px;
-		font-size: 11px;
-		color: var(--muted);
-		background-color: var(--surface);
-	}
-	.scroll {
-		display: flex;
-		flex-direction: column;
-		flex-grow: 1;
-		flex-basis: 0;
-		min-height: 0;
-		padding-right: 8px;
-		overflow-y: scroll;
-		scrollbar-color: var(--thumb);
-		scrollbar-width: 6px;
-	}
-	.column {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		padding-bottom: 12px;
-	}
-	.end {
-		padding: 10px 0px;
-		font-size: 12px;
-		text-align: center;
-		color: var(--muted);
 	}
 </style>

@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click_test_id, all_text, check, finish, press, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
+import { mount_headless, click_test_id, all_text, check, drag, finish, press, pump, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { link, type Notification } from './src/gh.ts';
@@ -75,6 +75,20 @@ const in_lane = (id: number, key: string) => {
 	return !!c && !!l && c.x >= l.x && c.x + c.width <= l.x + l.width;
 };
 
+/** Scrolls a lane down in 1500 px wheels, as a trackpad does: a windowed list knows the heights of
+ * its mounted rows only, so one huge jump stops short. Headless, a list draws a wheel scroll, and
+ * reports its new visible range, only on a later frame, so each wheel gets a moment and a pump. */
+async function scroll_lane(key: string, steps = 10) {
+	for (let k = 0; k < steps; k++) {
+		wheel(find_test_id(`lane-${key}`)!, 0, -1500);
+		await wait(40);
+		pump();
+	}
+	wheel(find_test_id(`lane-${key}`)!, 0, -1);
+	await wait(60);
+	pump();
+}
+
 let app = mount_headless(App, { width: 1280, height: 800 });
 
 await wait_for(() => text().includes('gh auth login'), { label: 'sign-in hint' });
@@ -87,28 +101,45 @@ check('the signed-in user is shown', text().includes('as octocat'));
 
 click_test_id('continue');
 check('finishing onboarding saves it', saved().onboarded === true);
-await wait_for(() => has('Note 200'), { label: 'the first 50 cards of every lane' });
+// A lane mounts only a window of rows around what is on screen, so counts stand in for far-off cards.
+const badges = (b: string) => all_text().filter((t) => t === b).length;
+await wait_for(() => badges('50+') === 4, { label: 'the first 50 cards of every lane' });
 await wait_for(() => !text().includes('loading…'), { label: 'the start settles' });
 check('the board has the four lanes', ['Todo', 'Requested', 'Waiting on me', 'Merged / Closed'].every(has));
 check(
 	'each card goes in the lane for its reason and state',
 	in_lane(4, 'requested') && in_lane(5, 'waiting') && in_lane(6, 'todo') && in_lane(7, 'done')
 );
-check('every lane starts with 50 cards', text().includes('200+ unread') && (all_text().filter((t) => t === '50+').length === 4));
+check('every lane starts with 50 cards', text().includes('200+ unread') && badges('50+') === 4);
+check('a lane mounts a window of rows, not all of them', has('Note 4') && !has('Note 200'));
 await wait(1500);
 check('nothing more loads without a scroll', !has('Note 201'));
 
-wheel(find_test_id('lane-requested')!, 0, -20000);
+await scroll_lane('requested');
 await wait_for(() => has('Note 204'), { label: 'a scroll in Requested loads its next cards', timeout: 6000 });
 await wait_for(() => !text().includes('loading…'), { label: 'Requested settles' });
-check('Requested gets the rest of its cards', has('Note 288'));
+check('Requested gets the rest of its cards', has('72'));
 check('a scroll in one lane adds no cards to the others', !has('Note 201') && !has('Note 202') && !has('Note 203'));
 check('the last short page ends the loading', text().includes('290 unread') && !text().includes('290+ unread'));
+await scroll_lane('requested');
+await wait_for(() => text().includes('All caught up'), { label: 'the end of Requested' });
 check('a lane with every card says so', text().includes('All caught up'));
 
-wheel(find_test_id('lane-todo')!, 0, -20000);
+await scroll_lane('todo');
 await wait_for(() => has('Note 202'), { label: 'Todo shows its loaded cards on its own scroll' });
 check('Todo gets its cards without other lanes', !has('Note 201') && !has('Note 203'));
+
+// The thumb is GPUI's and can't be dragged, so a strip over it scrolls to the row at the pointer.
+{
+	const strip = bounds(find_test_id('gutter-waiting')!)!;
+	const x = strip.x + strip.width / 2;
+	const full = badges('50+');
+	drag({ x, y: strip.y + 5 }, { x, y: strip.y + strip.height - 2 }, { steps: 6 });
+	await wait(60);
+	pump();
+	await wait_for(() => has('73'), { label: 'a drag to the end of Waiting on me' });
+	check('dragging the scroll strip to the end grows that lane only', has('73') && badges('50+') === full - 1);
+}
 
 click_test_id('add-filter');
 await wait_for(() => has('Repository'), { label: 'the filter menu' });
@@ -216,4 +247,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 31);
+finish('gitbox', 33);

@@ -109,6 +109,11 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   reason, author): any value of one field, and every field. `matches` is what the lanes use.
 - `src/FilterBar.svelte` — the row under the header: a menu to add filters (a field, then its
   values with counts) and a chip for each filter applied.
+- `src/Lane.svelte` — one lane as a windowed `<virtual-list>`: GPUI paints only the rows on screen
+  and Svelte mounts only about 40 around them (`itemCount` + `windowStart`, moved by
+  `onvisiblerange`). GPUI paints the thumb; a strip over it scrolls with `scrollToItem` when dragged.
+  GPUI reports no visible range after `scrollToItem`, so a jump moves the window itself. Headless,
+  a list draws a wheel scroll only on a later frame, so tests wheel in steps and pump.
 - `src/Card.svelte` — one notification; a click or Enter opens `link(n)` in the browser: the PR or
   issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
   the subject's API object names.
