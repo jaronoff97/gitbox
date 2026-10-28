@@ -16,7 +16,7 @@
 	import * as gh from './gh.ts';
 	import { notifications, PER_PAGE, viewer, type Action, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
-	import { lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
+	import { LANE_TITLES, lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
 
 	/** On macOS the toolbar is the title bar (app.ts makes it transparent) and leaves room for the traffic lights. */
 	const MAC = process.platform === 'darwin';
@@ -25,10 +25,10 @@
 	let { onsetup }: { onsetup: () => void } = $props();
 
 	const LANES = [
-		{ key: 'todo', title: 'Todo', tone: 'muted' },
-		{ key: 'requested', title: 'Requested', tone: 'warn' },
-		{ key: 'waiting', title: 'Waiting on me', tone: 'accent' },
-		{ key: 'done', title: 'Merged / Closed', tone: 'merged' }
+		{ key: 'todo', title: LANE_TITLES.todo, tone: 'muted' },
+		{ key: 'requested', title: LANE_TITLES.requested, tone: 'warn' },
+		{ key: 'waiting', title: LANE_TITLES.waiting, tone: 'accent' },
+		{ key: 'done', title: LANE_TITLES.done, tone: 'merged' }
 	];
 
 	/** The lane of a notification: a finished PR or issue is done, whatever the reason. */
@@ -655,12 +655,12 @@
 		flex-direction: column;
 	}
 	.title {
-		font-size: 13px;
+		font-size: var(--text-title, 13px);
 		font-weight: bold;
 		color: var(--ink);
 	}
 	.subtitle {
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 	}
 	.grow {

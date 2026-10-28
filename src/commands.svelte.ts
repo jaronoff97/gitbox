@@ -2,6 +2,7 @@
 // palette (#6) and the menu bar (#7) all read it, so a command exists in one place.
 import { on_window_key, type GpuixEvent } from 'gpuix-svelte';
 import { untrack } from 'svelte';
+import { settings } from './settings.svelte.ts';
 
 export type Group = 'app' | 'file' | 'edit' | 'view' | 'go' | 'notification' | 'window' | 'help';
 
@@ -110,6 +111,8 @@ export function listen() {
 			if (!hit) continue;
 			if ((single(hit) || c.skip_editing) && e.editing) return;
 			if (single(hit) && keys_claimed.by > 0) return;
+			// Settings → Shortcuts can turn the single keys off (#8).
+			if (single(hit) && !settings.single_keys && hit !== 'escape' && hit !== 'enter') return;
 			// The menu bar owns its ⌘ keys; ⌘A and ⌘↩ (skip_editing) stay here, as text fields need them.
 			if (native_menu.on && parse(hit).mods.has('cmd') && !c.skip_editing) return;
 			if (!enabled(c)) continue;

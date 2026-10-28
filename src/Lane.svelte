@@ -247,7 +247,7 @@
 		border-radius: 4px;
 	}
 	.title {
-		font-size: 13px;
+		font-size: var(--text-title, 13px);
 		font-weight: semibold;
 		color: var(--ink);
 	}
@@ -270,13 +270,13 @@
 		color: var(--accent);
 	}
 	.picked {
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--accent);
 	}
 	.badge {
 		padding: 0px 7px;
 		border-radius: 9px;
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 		background-color: var(--surface);
 	}
@@ -298,7 +298,7 @@
 	}
 	.row {
 		width: 100%;
-		padding: 0px 12px 8px 0px;
+		padding: 0px 12px var(--row-gap, 8px) 0px;
 	}
 	.gutter {
 		position: absolute;
@@ -319,7 +319,7 @@
 	}
 	.end {
 		padding: 10px 0px 14px 0px;
-		font-size: 12px;
+		font-size: var(--text-sm, 12px);
 		text-align: center;
 		color: var(--muted);
 	}

@@ -158,7 +158,13 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 - `src/Card.svelte` — one notification; a click or Enter opens `link(n)` in the browser: the PR or
   issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
   the subject's API object names.
-- `src/Settings.svelte` — the settings dialog (⌘, opens it; ⌘R refreshes the board).
+- `src/Settings.svelte` — the settings dialog in tabs (#8): General, Board (cards per lane; lanes
+  shown, ordered and sorted), Appearance, Shortcuts (`ShortcutList.svelte`, as ⌘/ shows) and Advanced
+  (pages at once, `gh_host` → GH_HOST, `gh_path`, setup, reset). It opens on the last tab; ⌘[ ⌘]
+  change tabs.
+- `src/theme.ts` — the palettes (Catppuccin Mocha dark, Latte light) and the board's text size and
+  density, as CSS variables App sets. GPUI's rem is fixed, so text size scales the board's own
+  sizes. "System" reads `defaults read -g AppleInterfaceStyle` every 30 s.
 - `src/icons.ts` — Octicons as raw markup for `<svg source>`, which a compiled binary needs.
 - `assets/icon.svg`, `assets/icon.png` — the app icon and its 1024 px render (see `build.ts`).
 - `test.ts` — the headless test (`gpuix-svelte/test`); a plain script that exits 1 on failure. It

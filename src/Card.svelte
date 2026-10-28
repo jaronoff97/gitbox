@@ -103,9 +103,9 @@
 	.card {
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: var(--card-gap, 8px);
 		width: 100%;
-		padding: 12px;
+		padding: var(--card-pad, 12px);
 		border-radius: 10px;
 		border-width: 1px;
 		border-color: var(--border);
@@ -146,7 +146,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		font-size: 12px;
+		font-size: var(--text-sm, 12px);
 		color: var(--muted);
 	}
 	.avatar {
@@ -162,11 +162,11 @@
 		overflow: hidden;
 	}
 	.when {
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 	}
 	.title {
-		font-size: 13px;
-		line-height: 18px;
+		font-size: var(--text-md, 13px);
+		line-height: var(--line-md, 18px);
 		color: var(--ink);
 		line-clamp: 3;
 	}
@@ -174,7 +174,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 	}
 	.icon {
@@ -204,7 +204,7 @@
 		border-radius: 9px;
 		border-width: 1px;
 		border-color: var(--border);
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 	}
 	.label-name {
@@ -219,7 +219,7 @@
 		border-radius: 3px;
 	}
 	.more {
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 	}
 	.reason {

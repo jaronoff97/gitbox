@@ -6,6 +6,7 @@ import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
 import { menu_json } from './src/menubar.ts';
+import { palette as colors } from './src/theme.ts';
 import { link, type Notification } from './src/gh.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
@@ -625,28 +626,90 @@ check('arrows in the palette leave the board alone', calls().filter((c) => c.cmd
 	);
 }
 
+const dialog_open = () => find_test_id('settings-dialog') !== null;
 click_test_id('settings');
-await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
+await wait_for(dialog_open, { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
 const behind = () => bounds(find_test_id('card-289')!)?.y;
 const before = behind();
 wheel({ x: 800, y: 400 }, 0, -300);
 await wait(300);
 check('a scroll over the settings leaves the board behind still', before !== undefined && behind() === before);
-click_test_id('toggle-hide-done');
-await wait_for(() => !has('Merged / Closed'), { label: 'the done lane hides' });
+
+// Settings in tabs (#8). Board: lanes on and off, their order and sort; cards per lane.
+click_test_id('tab-board');
+await wait_for(() => has('Cards per lane'), { label: 'the Board tab' });
+click_test_id('lane-shown-done');
+await wait_for(() => !find_test_id('lane-done'), { label: 'the done lane hides' });
 click_test_id('lane_size-25');
 await wait_for(() => all_text().filter((t) => t === '25+').length === 3, { label: 'lanes of 25' });
-check('settings change the board at once', !has('Merged / Closed') && badges('25+') === 3);
+check('settings change the board at once', !find_test_id('lane-done') && badges('25+') === 3);
 check('settings are saved', saved().settings.lanes.find((l: { key: string }) => l.key === 'done').shown === false && saved().settings.lane_size === 25);
-press('escape');
-await wait_for(() => !has('Cards per lane'), { label: 'Escape closes settings' });
+const x = (key: string) => bounds(find_test_id(`lane-${key}`)!)!.x;
+click_test_id('lane-up-waiting');
+await wait_for(() => x('waiting') < x('requested'), { label: 'Waiting on me moves left' });
+check(
+	'↑ moves a lane earlier on the board, and the order is saved',
+	saved().settings.lanes.map((l: { key: string }) => l.key).join(',') === 'todo,waiting,requested,done'
+);
+click_test_id('lane-down-waiting');
+await wait_for(() => x('waiting') > x('requested'), { label: 'and back' });
 
-// The settings dialog by keyboard: the focus starts on its first control; Space picks, → moves on.
+// Appearance: density and text size change a card's size; the theme is saved, and its palettes differ.
+click_test_id('tab-appearance');
+await wait_for(() => has('Theme'), { label: 'the Appearance tab' });
+const card_h = () => bounds(find_test_id('card-2')!)!.height;
+const h0 = card_h();
+click_test_id('density-compact');
+await wait_for(() => card_h() < h0, { label: 'compact cards' });
+click_test_id('density-comfortable');
+await wait_for(() => card_h() === h0, { label: 'comfortable again' });
+click_test_id('text_size-1.3');
+await wait_for(() => card_h() > h0, { label: 'larger text' });
+check('density and text size change the cards', card_h() > h0 && saved().settings.text_size === 1.3);
+click_test_id('text_size-1');
+click_test_id('theme-light');
+await wait(100);
+check('the theme is saved, and light and dark differ', saved().settings.theme === 'light' && colors(false).bg !== colors(true).bg);
+click_test_id('theme-dark');
+
+// Shortcuts: the registry's list, and single keys off.
+click_test_id('tab-shortcuts');
+await wait_for(() => has('Single-key shortcuts'), { label: 'the Shortcuts tab' });
+check('the Shortcuts tab lists the commands', ['Next Card', 'Refresh', 'Command Palette…'].every(has));
+click_test_id('toggle-single_keys');
+press('escape');
+await wait_for(() => !dialog_open(), { label: 'Escape closes settings' });
+const opens_8 = calls().filter((c) => c.cmd.startsWith('open ')).length;
+hover(find_test_id('lane-todo')!);
+press('escape');
+press('j');
+press('enter');
+await wait(150);
+check('with single keys off, j does nothing', calls().filter((c) => c.cmd.startsWith('open ')).length === opens_8);
+
+// The dialog opens on the last tab; ⌘] goes to the next.
 press('cmd-,');
-await wait_for(() => has('Cards per lane'), { label: '⌘, opens settings' });
+await wait_for(() => has('Single-key shortcuts'), { label: '⌘, opens on the last tab' });
+click_test_id('toggle-single_keys');
+press('cmd-]');
+await wait_for(() => has('Pages fetched at once'), { label: '⌘] goes to Advanced' });
+check('the dialog remembers its tab, and ⌘] moves on', saved().settings.single_keys === true);
+
+// The dialog by keyboard: its first control (a tab) has the focus; ← and → change tabs, and on a
+// choice they change the option.
+press('escape');
+await wait_for(() => !dialog_open(), { label: 'closed' });
+press('cmd-,');
+await wait_for(dialog_open, { label: '⌘, opens settings' });
 // The dialog takes the focus a tick after it mounts, when its controls exist natively.
 await wait(100);
+press('left');
+await wait_for(() => has('Single-key shortcuts'), { label: '← on the tabs' });
+check('← and → on the tabs change the tab', has('Single-key shortcuts'));
+click_test_id('tab-board');
+await wait_for(() => has('Cards per lane'), { label: 'the Board tab again' });
+click_test_id('lane_size-25');
 press('right');
 await wait(100);
 check('→ on a choice picks the next option', saved().settings.lane_size === 50);
@@ -654,7 +717,7 @@ press('left');
 await wait(100);
 check('← picks the one before', saved().settings.lane_size === 25);
 press('escape');
-await wait_for(() => !has('Cards per lane'), { label: 'Escape closes settings again' });
+await wait_for(() => !dialog_open(), { label: 'Escape closes settings again' });
 
 await app.unmount();
 app = mount_headless(App, { width: 1280, height: 800 });
@@ -663,10 +726,12 @@ check('a restart skips onboarding', !text().includes('Welcome to gitbox'));
 // With lanes of 25, the start alone loads one batch; oldest first has to load the last page too.
 await wait_for(() => has('Note 289'), { label: 'oldest first after a restart' });
 check('a saved oldest first loads its whole lane after a restart', !has('Note 1'));
-check('settings survive a restart', !has('Merged / Closed'));
+check('settings survive a restart', !find_test_id('lane-done'));
 
 click_test_id('settings');
-await wait_for(() => has('Cards per lane'), { label: 'the settings dialog again' });
+await wait_for(dialog_open, { label: 'the settings dialog again' });
+click_test_id('tab-advanced');
+await wait_for(() => find_test_id('settings-reset') !== null, { label: 'the Advanced tab' });
 click_test_id('settings-reset');
 press('escape');
 await wait_for(() => has('Note 1'), { label: 'newest first again' });
@@ -708,4 +773,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 92);
+finish('gitbox', 99);

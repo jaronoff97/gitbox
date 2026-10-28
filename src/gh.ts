@@ -1,13 +1,21 @@
 // Every GitHub call goes through the local `gh` CLI, so the app holds no token of its own.
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { settings } from './settings.svelte.ts';
 
 const exec = promisify(execFile);
 
 // An app started from Finder or the Dock gets launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin), which
 // misses where Homebrew and Linuxbrew put gh. Appended, so a gh earlier on a real PATH still wins.
 const EXTRA_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin'];
-const env = () => ({ ...process.env, PATH: [process.env.PATH, ...EXTRA_PATH].filter(Boolean).join(':') });
+const env = () => ({
+	...process.env,
+	PATH: [process.env.PATH, ...EXTRA_PATH].filter(Boolean).join(':'),
+	// Settings → Advanced (#8): a GitHub Enterprise host.
+	...(settings.gh_host.trim() && { GH_HOST: settings.gh_host.trim() })
+});
+/** gh itself: Settings → Advanced's path, else the one on PATH. */
+const GH = () => settings.gh_path.trim() || 'gh';
 
 export type Notification = {
 	id: string;
@@ -68,11 +76,12 @@ export type Check = { label: string; hint: string; run: () => Promise<string> };
 /** Runs `gh` and returns stdout; rejects with stderr (or the spawn error) on failure. */
 export async function gh(...args: string[]): Promise<string> {
 	try {
-		const { stdout } = await exec('gh', args, { maxBuffer: 64 * 1024 * 1024, env: env() });
+		const { stdout } = await exec(GH(), args, { maxBuffer: 64 * 1024 * 1024, env: env() });
 		return stdout.trim();
 	} catch (e) {
 		const err = e as { code?: string; stderr?: string; stdout?: string; message: string };
-		if (err.code === 'ENOENT') throw new Error(`gh was not found on PATH or in ${EXTRA_PATH.join(', ')}`);
+		if (err.code === 'ENOENT')
+			throw new Error(settings.gh_path.trim() ? `gh was not found at ${GH()}` : `gh was not found on PATH or in ${EXTRA_PATH.join(', ')}`);
 		// GraphQL exits 1 when some fields fail, yet still prints the data it got.
 		throw Object.assign(new Error(err.stderr?.trim() || err.message), { stdout: err.stdout });
 	}
@@ -228,7 +237,7 @@ export function set_state(n: Notification, state: 'closed' | 'open', reason?: 'c
 export function comment(n: Notification, body: string) {
 	const url = web_url(n.subject.url);
 	if (!url) return Promise.reject(new Error('Only a pull request or an issue takes comments'));
-	return pipe('gh', [kind(n), 'comment', url, '--body-file', '-'], body);
+	return pipe(GH(), [kind(n), 'comment', url, '--body-file', '-'], body);
 }
 
 /** Puts `text` on the clipboard: gpuix-svelte has no clipboard call, so this is the system's tool.
