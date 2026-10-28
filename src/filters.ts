@@ -2,7 +2,7 @@
 // values (repo a OR repo b); filters on different fields must all match (repo a AND label bug).
 import type { Notification } from './gh.ts';
 
-export type Field = 'repo' | 'type' | 'state' | 'label' | 'reviews' | 'review' | 'reason' | 'author';
+export type Field = 'repo' | 'type' | 'state' | 'label' | 'reviews' | 'review' | 'reason' | 'author' | 'org';
 export type Filter = { field: Field; value: string };
 
 /** "PullRequest" or "review_requested" as words: "pull request", "review requested". */
@@ -29,15 +29,17 @@ export const FIELDS: { key: Field; title: string; values: (n: Notification) => s
 	},
 	{ key: 'review', title: 'Review status', values: (n) => (n.review ? [n.review] : []) },
 	{ key: 'reason', title: 'Reason', values: (n) => [words(n.reason)] },
-	{ key: 'author', title: 'Author', values: (n) => (n.author ? [n.author] : []) }
+	{ key: 'author', title: 'Author', values: (n) => (n.author ? [n.author] : []) },
+	{ key: 'org', title: 'Organization', values: (n) => [n.repository.owner.login] }
 ];
 
 export const field = (key: Field) => FIELDS.find((f) => f.key === key)!;
 
 export function matches(n: Notification, filters: Filter[]): boolean {
 	for (const [key, picked] of Map.groupBy(filters, (f) => f.field)) {
-		const values = field(key).values(n);
-		if (!picked.some((f) => values.includes(f.value))) return false;
+		// GitHub's names ignore case, and an automation's values are typed.
+		const values = field(key).values(n).map((v) => v.toLowerCase());
+		if (!picked.some((f) => values.includes(f.value.trim().toLowerCase()))) return false;
 	}
 	return true;
 }

@@ -1,13 +1,14 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
+import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, find_all, bounds, screenshot } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
 import { menu_json } from './src/menubar.ts';
 import { palette as colors } from './src/theme.ts';
 import { link, type Notification } from './src/gh.ts';
+import { automations, check as check_automations, put } from './src/automations.svelte.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
 // pages of 50 (the last has 40), titled "Note 1" to "Note 290". Note i is PR i, and i % 4 picks
@@ -44,6 +45,8 @@ else if (page) {
 	if (!process.env.FAKE_AUTHED) { console.error('HTTP 401: Bad credentials'); process.exit(1); }
 	// The first page is where every load starts, so the test can count loads.
 	if (page[1] === '1' && process.env.FAKE_LOG) require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd }) + '\\n');
+	// FAKE_SLOW_PAGES makes each page take 300 ms, so a test can see a refresh in progress.
+	if (process.env.FAKE_SLOW_PAGES) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
 	const from = (page[1] - 1) * 50 + 1;
 	const to = Math.min(from + 49, 290);
 	console.log(JSON.stringify(Array.from({ length: Math.max(to - from + 1, 0) }, (_, k) => note(from + k))));
@@ -51,7 +54,7 @@ else if (page) {
 	console.log(JSON.stringify([[{ summary: 'Bad thing', html_url: 'https://github.com/octo/repo/security/advisories/GHSA-1' }]]));
 } else if (cmd === 'api https://api.github.com/repos/octo/repo/releases/1 --jq .html_url') {
 	console.log('https://github.com/octo/repo/releases/tag/v1');
-} else if ((cmd.startsWith('api -X ') && cmd.includes(' notifications/threads/')) || /^(pr|issue) (close|reopen|comment) /.test(cmd)) {
+} else if ((cmd.startsWith('api -X ') && cmd.includes(' notifications/threads/')) || /^(pr|issue) (close|reopen|comment|review) /.test(cmd)) {
 	// Card actions (#2): logged for the test to read; thread 12 refuses to be marked done.
 	const stdin = cmd.includes('--body-file -') ? require('fs').readFileSync(0, 'utf8') : undefined;
 	require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd, stdin }) + '\\n');
@@ -86,9 +89,32 @@ require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: ${JSON.
 `,
 		{ mode: 0o755 }
 	);
+// A fake `fm` (Apple's on-device model, #chat): it echoes the prompt with the turn, which it keeps in
+// the transcript file, and logs the call with its instructions. FAKE_NO_FM makes the model missing.
+writeFileSync(
+	join(bin, 'fm'),
+	`#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
+if (args[0] === 'available') {
+	if (process.env.FAKE_NO_FM) { console.error('\\x1b[31mApple Intelligence is not enabled\\x1b[0m'); process.exit(1); }
+	console.log('System model available');
+} else if (args[0] === 'respond') {
+	const prompt = fs.readFileSync(0, 'utf8');
+	const turn = (opt('--resume') ? JSON.parse(fs.readFileSync(opt('--resume'), 'utf8')).turn : 0) + 1;
+	fs.writeFileSync(opt('--save-transcript'), JSON.stringify({ turn }));
+	fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'fm respond', stdin: prompt, instructions: opt('--instructions') }) + '\\n');
+	if (prompt === 'fail') { console.error('Error: \\x1b[31mThe model refused\\x1b[0m'); process.exit(1); }
+	process.stdout.write('You said ' + prompt + ', turn ' + turn);
+	console.error('Transcript saved to: ' + opt('--save-transcript'));
+}
+`,
+	{ mode: 0o755 }
+);
 process.env.FAKE_LOG = join(bin, 'calls.log');
 /** What the fake tools were asked to do, in order. */
-const calls = (): { cmd: string; stdin?: string }[] =>
+const calls = (): { cmd: string; stdin?: string; instructions?: string }[] =>
 	existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
 const called = (cmd: string) => calls().some((c) => c.cmd === cmd);
 const settings_filters = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8')).settings.filters.length;
@@ -122,7 +148,7 @@ async function scroll_lane(key: string, steps = 10) {
 	pump();
 }
 
-let app = mount_headless(App, { width: 1280, height: 800 });
+let app = mount_headless(App, { width: 1470, height: 800 });
 
 await wait_for(() => text().includes('gh auth login'), { label: 'sign-in hint' });
 check('a signed-out gh shows the login hint', text().includes('not logged in'));
@@ -720,7 +746,7 @@ press('escape');
 await wait_for(() => !dialog_open(), { label: 'Escape closes settings again' });
 
 await app.unmount();
-app = mount_headless(App, { width: 1280, height: 800 });
+app = mount_headless(App, { width: 1470, height: 800 });
 await wait_for(() => has('Note 2'), { label: 'the board after a restart' });
 check('a restart skips onboarding', !text().includes('Welcome to gitbox'));
 // With lanes of 25, the start alone loads one batch; oldest first has to load the last page too.
@@ -752,6 +778,190 @@ press('enter');
 await wait_for(() => has('Todo'), { label: '↩ shows the board' });
 check('onboarding works from the keyboard', saved().onboarded === true);
 
+// Background jobs: a refresh shows its progress in the top-right corner, and Refresh (the button and
+// ⌘R) waits for it rather than starting it over.
+await wait_for(() => !find_test_id('job'), { label: 'no load in progress' });
+process.env.FAKE_SLOW_PAGES = '1';
+const loads_at_refresh = loads();
+click_test_id('refresh');
+await wait_for(() => has('Refreshing inbox'), { label: 'the refresh popup' });
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-job.png'));
+check('a refresh shows its progress in the corner', has('Starting…') && (bounds(find_test_id('job')!)?.x ?? 0) > 1100);
+click_test_id('refresh');
+press('cmd-r');
+await wait_for(() => !find_test_id('job'), { timeout: 8000, label: 'the refresh ends' });
+delete process.env.FAKE_SLOW_PAGES;
+check('Refresh waits for the load in progress', loads() === loads_at_refresh + 1);
+
+// The sidebar: Automations and Chat cover the board, which stays loaded behind them, keys and all.
+await wait_for(() => !!find_test_id('card-4'), { label: 'the board again' });
+click_test_id('nav-automations');
+pump();
+const calls_before = calls().length;
+press('enter');
+await wait(100);
+check('Automations hides the board and rests its keys', badges('Automations') === 2 && !bounds(find_test_id('card-4')!) && calls().length === calls_before);
+if (process.env.SHOT) screenshot(process.env.SHOT);
+press('ctrl-3');
+pump();
+check('ctrl-3 opens Chat', badges('Chat') === 2 && badges('Automations') === 1);
+press('ctrl-1');
+pump();
+click(find_test_id('card-4')!);
+await wait_for(() => calls().length > calls_before, { label: 'a card opens again' });
+check('the board is back as it was', badges('50+') === 4);
+
+// Automations: a condition per row, its field from a menu, then the steps; saved in automations.json.
+const automations_json = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'automations.json'), 'utf8'));
+click_test_id('nav-automations');
+click_test_id('new-automation');
+pump();
+click_test_id('automation-name');
+type('b o b');
+click_test_id('add-condition');
+pump();
+click_test_id('cond-value-1');
+type('b o b');
+click_test_id('add-condition');
+pump();
+click_test_id('cond-field-2');
+pump();
+click_test_id('cond-pick-org');
+pump();
+click_test_id('cond-value-2');
+type('shift-o c t o');
+click_test_id('step-done');
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-editor.png'));
+click_test_id('automation-save');
+pump();
+const made = automations_json()[0];
+check(
+	'a new automation is saved with its conditions and steps',
+	made?.name === 'bob' &&
+		JSON.stringify(made.when) ===
+			JSON.stringify([
+				{ field: 'reason', value: 'review requested' },
+				{ field: 'author', value: 'bob' },
+				{ field: 'org', value: 'Octo' }
+			]) &&
+		made.then.join() === 'approve,done'
+);
+check('the list describes it', has('When reason is review requested and author is bob and organization is Octo, approve the pull request, then mark as done.'));
+
+// Saved now, it leaves the notifications already there alone; made earlier, it acts on bob's review
+// requests (4, 8 … 48 on the first page) once each. Thread 12 refuses to be marked done.
+await check_automations();
+check('a new automation leaves older notifications alone', !calls().some((c) => c.cmd.startsWith('pr review')));
+put({ ...automations.list[0], created: '2000-01-01T00:00:00.000Z' });
+const automating = check_automations();
+await wait_for(() => has('Running automations'), { label: 'the automations job' });
+check('the automations show their progress', text().includes('of 12'));
+await automating;
+const approved = calls().filter((c) => c.cmd.startsWith('pr review'));
+check('it approves each matching PR', approved.length === 12 && called('pr review https://github.com/octo/repo/pull/4 --approve'));
+check('then marks it done', called('api -X DELETE notifications/threads/48'));
+check('a failed step is in the log', saved().automation_log.filter((r: { error?: string }) => r.error).length === 1);
+await check_automations();
+check('it acts on a thread once', calls().filter((c) => c.cmd.startsWith('pr review')).length === 12);
+pump();
+check('the activity lists what it did', has('Note 48') && text().includes('HTTP 403'));
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-list.png'));
+
+click_test_id(`automation-${made.id}`);
+pump();
+click_test_id('automation-enabled');
+click_test_id('automation-save');
+pump();
+check('a change is saved', automations_json()[0].enabled === false);
+click_test_id(`automation-${made.id}`);
+pump();
+click_test_id('automation-delete');
+pump();
+check('Delete removes it', automations_json().length === 0 && has('No automations yet. Make one to approve, read or clear notifications as they arrive.'));
+click_test_id('new-automation');
+pump();
+click_test_id('cond-remove-0');
+click_test_id('automation-save');
+pump();
+check('an automation needs a condition', text().includes('Add a condition') && automations_json().length === 0);
+click_test_id('automation-cancel');
+press('ctrl-1');
+
+// Chat: Apple's on-device model through fm. The first turn starts the transcript with the user and
+// their notifications as instructions; later turns resume it. The chat outlives a switch of tabs.
+const turns = () => calls().filter((c) => c.cmd === 'fm respond');
+/** The model's replies: markdown, which GPUI keeps as source rather than text. */
+const replies = () =>
+	find_all((n) => n.testId === 'chat-reply').map((n) => (n as { customProps?: { source?: string } }).customProps?.source);
+press('ctrl-3');
+await wait_for(() => !!find_test_id('chat-input'), { label: 'the model is ready' });
+click_test_id('chat-input');
+type('h i');
+press('enter');
+await wait_for(() => replies().includes('You said hi, turn 1'), { label: 'the first reply' });
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+check(
+	'the first turn sends the prompt, with the notifications as instructions',
+	turns()[0].stdin === 'hi' && !!turns()[0].instructions?.includes('The user is octocat') && !!turns()[0].instructions?.includes('"Note 1"')
+);
+type('a g a i n');
+press('enter');
+await wait_for(() => replies().includes('You said again, turn 2'), { label: 'the second reply' });
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+check('a later turn resumes the transcript', turns()[1].stdin === 'again' && turns()[1].instructions === undefined);
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-chat.png'));
+press('ctrl-1');
+press('ctrl-3');
+await wait_for(() => !!find_test_id('chat-input'), { label: 'the chat again' });
+check('the chat outlives a switch of tabs', has('hi') && has('again') && replies().length === 2);
+type('f a i l');
+press('enter');
+await wait_for(() => has('The model refused'), { label: 'an fm error' });
+await wait(50);
+check('an fm error shows in the chat, without its colours', has('The model refused'));
+click_test_id('chat-new');
+pump();
+check('New chat empties it', !has('again'));
+click_test_id('chat-input');
+type('n e w');
+press('enter');
+await wait_for(() => turns().length === 4, { label: 'a new chat' });
+check('a new chat starts a new transcript', turns()[3].instructions !== undefined);
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+
+// History: each conversation is saved in chats/, newest first in the list; an old one opens with its
+// messages and resumes its transcript, and Delete removes both files.
+const chats_dir = join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'chats');
+const saved_chats = () =>
+	readdirSync(chats_dir)
+		.filter((f) => !f.endsWith('.fm.json'))
+		.map((f) => JSON.parse(readFileSync(join(chats_dir, f), 'utf8')) as { id: string; title: string; messages: unknown[] });
+const first_chat = saved_chats().find((c) => c.title === 'hi')!;
+check('both chats are saved, with their messages', saved_chats().length === 2 && first_chat.messages.length === 6);
+check('the list holds both, by their first message', has('hi') && has('new'));
+click_test_id(`chat-${first_chat.id}`);
+pump();
+check('a past chat opens with its messages', has('again') && replies().includes('You said again, turn 2'));
+click_test_id('chat-input');
+type('m o r e');
+press('enter');
+await wait_for(() => replies().includes('You said more, turn 4'), { label: 'a turn in a past chat' });
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+check('a past chat resumes its transcript', turns()[4].instructions === undefined);
+click_test_id(`chat-delete-${first_chat.id}`);
+pump();
+check(
+	'Delete removes a chat and its transcript',
+	saved_chats().length === 1 && !existsSync(join(chats_dir, `${first_chat.id}.fm.json`)) && !has('again')
+);
+process.env.FAKE_NO_FM = '1';
+press('ctrl-1');
+press('ctrl-3');
+await wait_for(() => has('Apple Intelligence is not enabled'), { label: 'no model' });
+check('without the model, Chat says why', has('Chat needs macOS 27 or later, with Apple Intelligence on.'));
+delete process.env.FAKE_NO_FM;
+press('ctrl-1');
+
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
 	({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
@@ -773,4 +983,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 99);
+finish('gitbox', 128);

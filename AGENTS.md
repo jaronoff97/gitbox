@@ -84,22 +84,28 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 ## Files
 
 - `app.ts` — the entry: `render_hot` opens the window and remounts `App.svelte` on save. On macOS
-  the title bar is transparent (`titlebarTransparent`), so the board's 52 px toolbar is the title bar
-  and the traffic lights sit in it; `standalone.ts` has the same options.
+  the title bar is transparent (`titlebarTransparent`), so the top 52 px of the sidebar and the
+  toolbar are the title bar, and the traffic lights sit atop the sidebar; `standalone.ts` has the
+  same options.
 - `dev.ts` — what `npm start` runs: `app.ts` as the gpuix-svelte bin would, but on macOS from a hard
   link to the runtime inside `dist/dev/Gitbox Dev.app`, so the Dock and menu bar show "Gitbox Dev"
   with the icon inverted (rendered from `assets/icon.svg` through an SVG colour filter) rather than
   "bun" or "node". `npm run build` deletes `dist/`; the next start makes it again.
 - `bundle.ts` — the macOS `.app` wrapper (`Info.plist`, `.icns` from `assets/icon.png`) that
   `dev.ts` and `build.ts` share.
-- `App.svelte` — the root component: the palette, then onboarding until it passes, then the board.
+- `App.svelte` — the root component: the palette, then onboarding until it passes, then a sidebar
+  with three tabs (Inbox, Automations, Chat; ⌃1–⌃3). The board stays mounted while another tab
+  covers it (`active={false}` hides it with `visibility: hidden` and rests its keys), so its cards
+  and scroll survive a switch. `--sidebar` is the sidebar's width; toasts and the selection bar
+  centre beside it.
 - `src/gh.ts` — every call to the `gh` CLI, the onboarding checks, and `open_url`. Each page of
   notifications gets its PRs' and issues' state, draft flag, author, labels and reviews from one
   batched GraphQL call (GraphQL has no notifications; `reviewDecision` is left out, as it made a
   page 4 s slower). `gh` runs with Homebrew's directories added to `PATH`, since an app started
   from Finder gets launchd's minimal one.
-- `src/store.ts` — state kept between runs (`onboarded`, `settings`), as JSON in
-  `$XDG_CONFIG_HOME/gitbox` (default `~/.config/gitbox/state.json`).
+- `src/store.ts` — state kept between runs (`onboarded`, `settings`, `automation_log`), as JSON in
+  `$XDG_CONFIG_HOME/gitbox` (default `~/.config/gitbox/state.json`); the automations themselves
+  are in `automations.json` beside it.
 - `src/commands.svelte.ts` — every command in one registry (#4): id, title, menu group, keys,
   `when`, `checked`, `run`. Components `register()` theirs in an `$effect`; `listen()`, called once
   in `App.svelte`, is the only app-wide key handler (dialogs keep their own Escape/Enter). A single
@@ -124,6 +130,24 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   only, so text fields keep them. Same-shaped menus update in place, as AppKit adds its own Edit
   items to each new menu. Node has no FFI: `npm start` keeps GPUI's menu. The headless test sets
   `GITBOX_NO_MENU`; `GITBOX_MENU_DEBUG=1` logs the menu bar, `=perform:<id>` also clicks an item.
+- `src/automations.svelte.ts` — automations: conditions (board `Filter`s, so `matches` decides;
+  case doesn't matter) and steps (approve, read, done, unsubscribe, in that order). `watch()`, from
+  `App.svelte` once onboarded, fetches the first unread page every minute and runs each enabled
+  automation on what it matches, once per thread and only on threads updated after it was made.
+  Each run goes to `automation_log`, which is also what stops a second run.
+- `src/Automations.svelte` — the Automations tab: the list (with on/off switches) and its activity
+  on the left, the editor on the right. A condition is a field from a menu, `is`, and a value, with
+  GitHub's values as chips for the fields that have a fixed set. Edits are a copy until Save.
+- `src/fm.ts`, `src/Chat.svelte` — the Chat tab: Apple's on-device model through the `fm` CLI that
+  macOS 27 ships. `fm available` decides whether the tab offers a chat or says why not. Each
+  conversation is two files in `~/.config/gitbox/chats`: `<id>.json` (title, time, messages) and
+  `<id>.fm.json`, fm's transcript (`--save-transcript`, then `--resume`), so an old chat goes on
+  after a restart. The list beside the chat opens or deletes them, newest first. A first turn gives
+  as instructions the user's login and their 20 newest unread notifications, as the model's
+  context is about 4,000 tokens. The prompt goes through stdin, and the reply streams into a
+  `<markdown>`. The chats are module state, so they outlive a switch of tabs. The model only talks
+  for now. The test puts a fake `fm` beside the fake `gh`.
+- `src/ago.ts` — "now", "5m", "3h", "2d", then a date: cards, automation activity and chats.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.
@@ -134,7 +158,7 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   (`settings.lane_sort`); since the API sends newest first, oldest first loads the whole lane before
   it shows a card.
 - `src/filters.ts` — the board filters (repository, type, state, label, reviews, review status,
-  reason, author): any value of one field, and every field. `matches` is what the lanes use.
+  reason, author, organization): any value of one field, and every field. `matches` is what the lanes use.
 - `src/FilterMenu.svelte` — the toolbar's filter button and menu: a field, then its values with
   counts.
 - `src/FilterBar.svelte` — the scope bar under the toolbar, shown while filters apply: a chip for
@@ -155,6 +179,12 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   (`mark_read`, `mark_done`, `unsubscribe`, `set_state`, `comment`, `copy`) are in `src/gh.ts`;
   a comment goes to `gh` through stdin.
 - `src/Toast.svelte` — short messages at the bottom of the window.
+- `src/jobs.svelte.ts`, `src/Jobs.svelte` — background work and its progress popup, in the
+  top-right corner under the toolbar on every tab. `track(title, work)` shows a job until `work`
+  settles; `work` sets its `detail`, and a `total` with `done` draws a bar. The popup takes no
+  clicks. The board's loads ("Refreshing inbox") and the automations (only when they have
+  something to do, as they check every minute) use it. Refresh, the button and ⌘R, does nothing
+  while a load runs.
 - `src/Card.svelte` — one notification; a click or Enter opens `link(n)` in the browser: the PR or
   issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
   the subject's API object names.

@@ -35,6 +35,8 @@
 		left: 0px;
 		bottom: 20px;
 		width: 100%;
+		/* Centred over the board, beside the sidebar (App sets its width). */
+		padding-left: var(--sidebar, 0px);
 		display: flex;
 		flex-direction: column;
 		align-items: center;
