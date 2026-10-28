@@ -52,3 +52,11 @@ export function options(items: Notification[], key: Field): { value: string; cou
 }
 
 export const same = (a: Filter, b: Filter) => a.field === b.field && a.value === b.value;
+
+/** `filters` with `f` added, or removed if it is there. */
+export const toggled = (filters: Filter[], f: Filter) =>
+	filters.some((g) => same(f, g)) ? filters.filter((g) => !same(f, g)) : [...filters, f];
+
+/** A label's colour (hex, no #), from any loaded notification that has it. */
+export const label_color = (items: Notification[], name: string) =>
+	items.flatMap((n) => n.labels ?? []).find((l) => l.name === name)?.color ?? '7f849c';

@@ -83,7 +83,9 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 
 ## Files
 
-- `app.ts` — the entry: `render_hot` opens the window and remounts `App.svelte` on save.
+- `app.ts` — the entry: `render_hot` opens the window and remounts `App.svelte` on save. On macOS
+  the title bar is transparent (`titlebarTransparent`), so the board's 52 px toolbar is the title bar
+  and the traffic lights sit in it; `standalone.ts` has the same options.
 - `dev.ts` — what `npm start` runs: `app.ts` as the gpuix-svelte bin would, but on macOS from a hard
   link to the runtime inside `dist/dev/Gitbox Dev.app`, so the Dock and menu bar show "Gitbox Dev"
   with the icon inverted (rendered from `assets/icon.svg` through an SVG colour filter) rather than
@@ -101,7 +103,7 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.
-- `src/Board.svelte` — the header and a board of the signed-in user's notifications in four lanes
+- `src/Board.svelte` — the toolbar and a board of the signed-in user's notifications in four lanes
   (Todo, Requested, Waiting on me, Merged / Closed; `lane_of` sorts them). Each lane starts with
   `lane_size` cards; a scroll near a lane's end shows that many more in that lane only, and fetches
   API pages only if they are not loaded yet. Each lane sorts newest or oldest first by `updated_at`
@@ -109,8 +111,10 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   it shows a card.
 - `src/filters.ts` — the board filters (repository, type, state, label, reviews, review status,
   reason, author): any value of one field, and every field. `matches` is what the lanes use.
-- `src/FilterBar.svelte` — the row under the header: a menu to add filters (a field, then its
-  values with counts) and a chip for each filter applied.
+- `src/FilterMenu.svelte` — the toolbar's filter button and menu: a field, then its values with
+  counts.
+- `src/FilterBar.svelte` — the scope bar under the toolbar, shown while filters apply: a chip for
+  each filter, Clear, and the match count.
 - `src/Lane.svelte` — one lane as a windowed `<virtual-list>`: GPUI paints only the rows on screen
   and Svelte mounts only about 40 around them (`itemCount` + `windowStart`, moved by
   `onvisiblerange`). GPUI paints the thumb; a strip over it scrolls with `scrollToItem` when dragged.

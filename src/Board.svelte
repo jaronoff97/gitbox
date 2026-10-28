@@ -1,13 +1,18 @@
 <script lang="ts">
 	import { on_window_key } from 'gpuix-svelte';
+	import Tooltip from 'gpuix-svelte/components/Tooltip.svelte';
 	import { untrack } from 'svelte';
 	import Lane from './Lane.svelte';
 	import FilterBar from './FilterBar.svelte';
+	import FilterMenu from './FilterMenu.svelte';
 	import { matches, type Filter } from './filters.ts';
 	import Settings from './Settings.svelte';
 	import { notifications, PER_PAGE, viewer, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
 	import { settings, update, type Sort } from './settings.svelte.ts';
+
+	/** On macOS the toolbar is the title bar (app.ts makes it transparent) and leaves room for the traffic lights. */
+	const MAC = process.platform === 'darwin';
 
 	/** Back to onboarding, for when gh stops working after setup (a logout, say). */
 	let { onsetup }: { onsetup: () => void } = $props();
@@ -180,29 +185,39 @@
 </script>
 
 <div class="page">
-	<div class="header">
-		<div class="brand">
-			<div class="mark">
-				{#each LANES as l (l.key)}<div class="bar" style="background-color: var(--{l.tone})"></div>{/each}
+	<div class="toolbar" class:mac={MAC}>
+		<div class="titles">
+			<div class="title">Gitbox</div>
+			<div class="subtitle">
+				{items.length}{more ? '+' : ''} {settings.include_read ? 'notifications' : 'unread'}{loading ? ' · loading…' : ''}
 			</div>
-			<div class="name">gitbox</div>
 		</div>
-		<div class="count">
-			{items.length}{more ? '+' : ''} {settings.include_read ? 'notifications' : 'unread'}{loading ? ' · loading…' : ''}
-		</div>
-
-
-		<svg class="icon-btn" class:spin={loading} source={sync} testId="refresh" tabindex={0} onclick={start}></svg>
-		<svg class="icon-btn" source={gear} testId="settings" tabindex={0} onclick={() => (show_settings = true)}></svg>
-		{#if me}
-			<div class="me">
-				{#if me.avatar_url}<img class="me-avatar" src={me.avatar_url} alt={me.login} />{/if}
-				<div>{me.login}</div>
-			</div>
+		<div class="grow"></div>
+		<FilterMenu {items} filters={settings.filters} onchange={filter} />
+		<Tooltip content="Refresh (⌘R)" side="bottom">
+			{#snippet children(hover)}
+				<div class="tool" class:busy={loading} {...hover} hitbox="self" testId="refresh" tabindex={0} onclick={start}>
+					<svg class="icon" source={sync}></svg>
+				</div>
+			{/snippet}
+		</Tooltip>
+		<Tooltip content="Settings (⌘,)" side="bottom">
+			{#snippet children(hover)}
+				<div class="tool" {...hover} hitbox="self" testId="settings" tabindex={0} onclick={() => (show_settings = true)}>
+					<svg class="icon" source={gear}></svg>
+				</div>
+			{/snippet}
+		</Tooltip>
+		{#if me?.avatar_url}
+			<Tooltip content={`Signed in as ${me.login}`} side="bottom" align="end">
+				<img class="me" src={me.avatar_url} alt={me.login} />
+			</Tooltip>
 		{/if}
 	</div>
 
-	<FilterBar {items} filters={settings.filters} matching={matching.length} onchange={filter} />
+	{#if settings.filters.length}
+		<FilterBar {items} filters={settings.filters} matching={matching.length} onchange={filter} />
+	{/if}
 
 	{#if error}
 		<div class="msg">
@@ -240,71 +255,67 @@
 		width: 100%;
 		height: 100%;
 	}
-	.header {
+	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-		padding: 10px 16px;
+		gap: 4px;
+		height: 52px;
+		flex-shrink: 0;
+		padding: 0px 14px 0px 16px;
 		border-bottom-width: 1px;
-		border-color: var(--border);
+		border-color: var(--separator);
+		background-color: var(--toolbar);
+		user-select: none;
 	}
-	.brand {
+	.toolbar.mac {
+		/* The traffic lights (app.ts places them at x 20) and the gap after them. */
+		padding-left: 92px;
+	}
+	.titles {
 		display: flex;
-		align-items: center;
-		gap: 8px;
+		flex-direction: column;
 	}
-	.mark {
-		display: flex;
-		align-items: flex-end;
-		gap: 2px;
-		height: 16px;
-	}
-	.bar {
-		width: 4px;
-		height: 16px;
-		border-radius: 2px;
-	}
-	.name {
-		font-size: 15px;
+	.title {
+		font-size: 13px;
 		font-weight: bold;
 		color: var(--ink);
 	}
-	.count {
-		flex-grow: 1;
-		padding-left: 6px;
-		font-size: 12px;
+	.subtitle {
+		font-size: 11px;
 		color: var(--muted);
 	}
-	.icon-btn {
-		width: 16px;
-		height: 16px;
-		padding: 7px;
-		border-radius: 7px;
+	.grow {
+		flex-grow: 1;
+	}
+	.tool {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 28px;
+		border-radius: 6px;
 		color: var(--muted);
 		cursor: pointer;
 	}
-	.icon-btn:hover {
+	.tool:hover {
 		color: var(--ink);
-		background-color: var(--surface);
+		background-color: var(--tool-hover);
 	}
-	.icon-btn.spin {
+	.tool.busy {
 		color: var(--accent);
 	}
-	.icon-btn:focus-visible {
+	.tool:focus-visible {
 		outline-width: 2px;
 		outline-color: var(--accent);
 	}
-	.me {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding-left: 6px;
-		font-size: 12px;
-		color: var(--muted);
+	.icon {
+		width: 15px;
+		height: 15px;
 	}
-	.me-avatar {
+	.me {
 		width: 22px;
 		height: 22px;
+		margin-left: 8px;
 		border-radius: 11px;
 	}
 	.msg {

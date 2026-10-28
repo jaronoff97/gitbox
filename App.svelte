@@ -16,6 +16,9 @@
 	set_css_vars({
 		bg: '#11111b',
 		lane: '#181825',
+		toolbar: '#1a1a28',
+		separator: '#00000099',
+		'tool-hover': '#ffffff14',
 		surface: '#1e1e2e',
 		raised: '#24273a',
 		border: '#313244',

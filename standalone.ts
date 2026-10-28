@@ -9,5 +9,9 @@ render(App, {
 	width: 1280,
 	height: 800,
 	minWidth: 960,
-	minHeight: 560
+	minHeight: 560,
+	// On macOS the board's toolbar is the title bar, with the traffic lights centred in its 52 px.
+	titlebarTransparent: process.platform === 'darwin',
+	trafficLightX: 20,
+	trafficLightY: 19
 });
