@@ -64,6 +64,10 @@ console.log(`built ${outfile}`);
 if (process.platform === 'darwin') {
 	const app = 'dist/Gitbox.app';
 	write_bundle(app, outfile);
+	// The native menu bar (#7): src/menubar.ts finds it in Frameworks, or beside the bare binary.
+	mkdirSync(`${app}/Contents/Frameworks`);
+	run('clang', ['-dynamiclib', '-fobjc-arc', '-framework', 'AppKit', '-o', `${app}/Contents/Frameworks/libgitbox_menu.dylib`, 'native/menu.m']);
+	run('cp', [`${app}/Contents/Frameworks/libgitbox_menu.dylib`, 'dist/libgitbox_menu.dylib']);
 	sign(app);
 	if (identity && notary) notarize(app);
 	dmg(app, `dist/gitbox-${pkg.version}-macos-arm64.dmg`);
@@ -96,6 +100,8 @@ function sign(target: string) {
 		return;
 	}
 	writeFileSync('dist/entitlements.plist', ENTITLEMENTS);
+	// Nested code first: the menu bar's library, then the bundle around it.
+	run('codesign', ['--force', '--options', 'runtime', '--timestamp', '--sign', identity, `${target}/Contents/Frameworks/libgitbox_menu.dylib`]);
 	run('codesign', ['--force', '--options', 'runtime', '--timestamp', '--entitlements', 'dist/entitlements.plist', '--sign', identity, target]);
 	run('codesign', ['--verify', '--strict', target]);
 	console.log(`signed ${target} as ${identity}`);

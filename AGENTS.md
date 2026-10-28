@@ -116,6 +116,14 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   entries from `options()`, "Go to" lanes, and "Open:" notifications (⌘↩ focuses the card).
   `>`, `#`, `@` narrow it to commands, filters, authors. `src/fuzzy.ts` scores the match; the last
   5 commands run (`recent` in state.json) lead the empty palette.
+- `src/menubar.ts`, `native/menu.m` — the native macOS menu bar (#7), from the registry. gpuix-svelte
+  has no menu API, so `menu.m` (AppKit) loads over `bun:ffi`: compiled by clang into
+  `dist/dev/libgitbox_menu.dylib` in development, into `Gitbox.app/Contents/Frameworks` by
+  `build.ts`. A click queues the command id; JS polls it every 50 ms. ⌘ keys are key equivalents
+  (the registry then leaves them to the menu); single keys, ⌘A, ⌘↩ and the Edit items are hints
+  only, so text fields keep them. Same-shaped menus update in place, as AppKit adds its own Edit
+  items to each new menu. Node has no FFI: `npm start` keeps GPUI's menu. The headless test sets
+  `GITBOX_NO_MENU`; `GITBOX_MENU_DEBUG=1` logs the menu bar, `=perform:<id>` also clicks an item.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.

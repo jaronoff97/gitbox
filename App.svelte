@@ -4,11 +4,25 @@
 	import Onboarding from './src/Onboarding.svelte';
 	import { init } from './src/settings.svelte.ts';
 	import { listen } from './src/commands.svelte.ts';
+	import { install, menu_json, type Menu } from './src/menubar.ts';
 	import { load, save } from './src/store.ts';
 
 	init();
 	// The one window key handler; every shortcut is a command in the registry (src/commands.svelte.ts).
 	$effect(listen);
+
+	// The native menu bar (#7): on macOS under Bun. It follows the registry, so a command, a check mark
+	// or an enabled state that changes sends the menus again (menubar.ts skips an unchanged one).
+	let menubar = $state<{ set(menus: Menu[]): void; stop(): void } | null>(null);
+	$effect(() => {
+		let gone = false;
+		install().then((m) => (gone ? m?.stop() : (menubar = m)));
+		return () => {
+			gone = true;
+			menubar?.stop();
+		};
+	});
+	$effect(() => menubar?.set(menu_json()));
 	let onboarded = $state(load().onboarded === true);
 
 	function set_onboarded(value: boolean) {

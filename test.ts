@@ -5,6 +5,7 @@ import { mount_headless, click, click_test_id, hover, all_text, check, drag, fin
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
+import { menu_json } from './src/menubar.ts';
 import { link, type Notification } from './src/gh.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
@@ -91,6 +92,8 @@ const calls = (): { cmd: string; stdin?: string }[] =>
 const called = (cmd: string) => calls().some((c) => c.cmd === cmd);
 const settings_filters = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8')).settings.filters.length;
 process.env.PATH = `${bin}:${process.env.PATH}`;
+// No native menu bar in a headless run; menu_json() is checked below instead.
+process.env.GITBOX_NO_MENU = '1';
 // The saved state goes to a temp dir, not the real ~/.config/gitbox.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'gitbox-config-'));
 const saved = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8'));
@@ -596,6 +599,32 @@ press('enter');
 await wait(150);
 check('arrows in the palette leave the board alone', calls().filter((c) => c.cmd.startsWith('open ')).length === opens_6);
 
+// The menu bar (#7) comes from the registry: menus in the macOS order, ⌘ keys as key equivalents,
+// single keys and the ones a text field needs (⌘A, ⌘↩) as hints only, toggles with their check.
+{
+	const menus = menu_json();
+	const find = (menu: string, title: string) => menus.find((m) => m.title === menu)?.items.find((i) => i.title === title);
+	check(
+		'the menu bar has the Mac menus in order',
+		menus.map((m) => m.title).join(',') === 'Gitbox,File,Edit,View,Go,Notification,Window,Help'
+	);
+	check(
+		'⌘ shortcuts are key equivalents; single keys and ⌘A are hints',
+		find('File', 'Refresh')?.keys === 'cmd-r' &&
+			find('Go', 'Next Card')?.hint === 'J' &&
+			!find('Go', 'Next Card')?.keys &&
+			find('Edit', 'Select All Cards')?.hint === '⌘A' &&
+			!find('Edit', 'Select All Cards')?.keys
+	);
+	check(
+		'toggles carry their state, and the standard items their roles',
+		find('View', 'Show Todo')?.checked === true &&
+			find('Gitbox', 'Quit Gitbox')?.role === 'quit' &&
+			find('Edit', 'Copy')?.role === 'copy' &&
+			!find('Edit', 'Copy')?.keys
+	);
+}
+
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
@@ -679,4 +708,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 89);
+finish('gitbox', 92);

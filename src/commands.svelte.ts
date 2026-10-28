@@ -110,7 +110,8 @@ export function listen() {
 			if (!hit) continue;
 			if ((single(hit) || c.skip_editing) && e.editing) return;
 			if (single(hit) && keys_claimed.by > 0) return;
-			if (native_menu.on && parse(hit).mods.has('cmd')) return;
+			// The menu bar owns its ⌘ keys; ⌘A and ⌘↩ (skip_editing) stay here, as text fields need them.
+			if (native_menu.on && parse(hit).mods.has('cmd') && !c.skip_editing) return;
 			if (!enabled(c)) continue;
 			e.preventDefault();
 			c.run();
