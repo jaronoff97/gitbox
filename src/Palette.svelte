@@ -1,7 +1,8 @@
 <script lang="ts">
 	import Portal from 'gpuix-svelte/components/Portal.svelte';
 	import { on_window_key, type GpuixEvent } from 'gpuix-svelte';
-	import { caps, commands, enabled, GROUPS } from './commands.svelte.ts';
+	import { untrack } from 'svelte';
+	import { caps, commands, enabled, GROUPS, keys_claimed } from './commands.svelte.ts';
 	import { FIELDS, options, same, toggled, type Field, type Filter } from './filters.ts';
 	import { score } from './fuzzy.ts';
 	import type { Notification } from './gh.ts';
@@ -131,6 +132,12 @@
 		active: () => true,
 		count: () => results.length,
 		pick: (i) => go(results[i])
+	});
+
+	// While open, the palette's keys are its own: the board's arrows and single keys wait.
+	$effect(() => {
+		untrack(() => keys_claimed.by++);
+		return () => untrack(() => void keys_claimed.by--);
 	});
 
 	// ⎋ closes; ⌘↩ takes a notification's other action (focus its card).

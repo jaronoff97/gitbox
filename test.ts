@@ -583,6 +583,19 @@ await wait(100);
 press('escape');
 await wait(100);
 
+// The palette owns the arrow keys: ↓ moves its list, not the board's focus.
+const opens_6 = calls().filter((c) => c.cmd.startsWith('open ')).length;
+press('escape');
+hover(find_test_id('lane-todo')!);
+await palette('');
+press('down');
+press('down');
+press('escape');
+await wait(100);
+press('enter');
+await wait(150);
+check('arrows in the palette leave the board alone', calls().filter((c) => c.cmd.startsWith('open ')).length === opens_6);
+
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
@@ -666,4 +679,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 88);
+finish('gitbox', 89);

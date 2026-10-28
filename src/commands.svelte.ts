@@ -96,6 +96,11 @@ export function caps(keys: string): string[] {
 /** While true, the registry leaves ⌘ shortcuts to the native menu bar (#7), which owns them then. */
 export const native_menu = $state({ on: false });
 
+/** A panel with its own list and search (the ⌘K palette) claims the plain keys while open: its ↑ ↓ ↩ ⎋
+ * and typing are its own, not the board's. `e.editing` can't tell, as gpuix doesn't set it for every
+ * key a text field gets. ⌘ shortcuts still run. */
+export const keys_claimed = $state({ by: 0 });
+
 /** The one window key handler: the first command whose keys match and that applies runs. */
 export function listen() {
 	return on_window_key('keydown', (e: GpuixEvent) => {
@@ -104,6 +109,7 @@ export function listen() {
 			const hit = keys.find((k) => matches(e, k));
 			if (!hit) continue;
 			if ((single(hit) || c.skip_editing) && e.editing) return;
+			if (single(hit) && keys_claimed.by > 0) return;
 			if (native_menu.on && parse(hit).mods.has('cmd')) return;
 			if (!enabled(c)) continue;
 			e.preventDefault();
