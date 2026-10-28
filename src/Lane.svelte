@@ -17,6 +17,7 @@
 		sort,
 		reset,
 		onsort,
+		onmenu,
 		ongrow
 	}: {
 		key: string;
@@ -30,6 +31,7 @@
 		/** Changes when the board starts this lane over (a filter, a refresh, a new order): back to the top. */
 		reset: string;
 		onsort: () => void;
+		onmenu: (n: Notification, x: number, y: number) => void;
 		/** Called when you scroll to the end: the board shows more cards here if it has them. */
 		ongrow: () => void;
 	} = $props();
@@ -151,7 +153,7 @@
 			{#each rows as i (i < cards.length ? cards[i].id : 'end')}
 				<div class="row">
 					{#if i < cards.length}
-						<Card n={cards[i]} />
+						<Card n={cards[i]} onmenu={(x, y) => onmenu(cards[i], x, y)} />
 					{:else}
 						<div class="end">{status}</div>
 					{/if}

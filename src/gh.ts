@@ -178,3 +178,63 @@ export function open_url(url: string) {
 		process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]];
 	spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
 }
+
+/** Runs `cmd` with `input` on stdin; rejects with stderr on a non-zero exit. */
+function pipe(cmd: string, args: string[], input: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const child = spawn(cmd, args, { env: env() });
+		let out = '';
+		let err = '';
+		child.stdout.on('data', (d) => (out += d));
+		child.stderr.on('data', (d) => (err += d));
+		child.on('error', reject);
+		child.on('close', (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(err.trim() || `${cmd} exited ${code}`))));
+		child.stdin.end(input);
+	});
+}
+
+/** What a card's context menu can do. */
+export type Action = 'open' | 'copy' | 'read' | 'done' | 'unsubscribe' | 'close' | 'close-not-planned' | 'reopen' | 'comment';
+
+/** The PR's or issue's number, from its URL. */
+export const number = (n: Notification) => n.subject.url?.match(/\/(\d+)$/)?.[1] ?? '';
+
+// Card actions (#2). Thread calls need the notifications or repo scope; close and comment need
+// write access to the repository.
+
+export const mark_read = (n: Notification) => gh('api', '-X', 'PATCH', `notifications/threads/${n.id}`);
+
+/** GitHub's "Done": the thread leaves the inbox. */
+export const mark_done = (n: Notification) => gh('api', '-X', 'DELETE', `notifications/threads/${n.id}`);
+
+/** Mutes the thread until a new mention, then marks it done. */
+export async function unsubscribe(n: Notification) {
+	await gh('api', '-X', 'PUT', `notifications/threads/${n.id}/subscription`, '-F', 'ignored=true');
+	await mark_done(n);
+}
+
+/** `pr` or `issue`, for the gh subcommands that take a PR's or an issue's URL. */
+const kind = (n: Notification) => (n.subject.type === 'PullRequest' ? 'pr' : 'issue');
+
+/** Closes or reopens a PR or issue; an issue closes as completed unless `reason` says otherwise. */
+export function set_state(n: Notification, state: 'closed' | 'open', reason?: 'completed' | 'not planned') {
+	const url = web_url(n.subject.url);
+	if (!url) return Promise.reject(new Error('Only a pull request or an issue can be closed'));
+	if (state === 'open') return gh(kind(n), 'reopen', url);
+	return gh(kind(n), 'close', url, ...(reason && kind(n) === 'issue' ? ['--reason', reason] : []));
+}
+
+/** Comments on a PR or issue; the body goes through stdin, so no text can break the command. */
+export function comment(n: Notification, body: string) {
+	const url = web_url(n.subject.url);
+	if (!url) return Promise.reject(new Error('Only a pull request or an issue takes comments'));
+	return pipe('gh', [kind(n), 'comment', url, '--body-file', '-'], body);
+}
+
+/** Puts `text` on the clipboard: gpuix-svelte has no clipboard call, so this is the system's tool.
+ * ponytail: Linux gets Wayland's wl-copy only; add xclip when someone runs it on X11. */
+export function copy(text: string) {
+	const [cmd, args]: [string, string[]] =
+		process.platform === 'darwin' ? ['pbcopy', []] : process.platform === 'win32' ? ['clip', []] : ['wl-copy', []];
+	return pipe(cmd, args, text);
+}
