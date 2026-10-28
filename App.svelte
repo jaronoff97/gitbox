@@ -3,9 +3,12 @@
 	import Board from './src/Board.svelte';
 	import Onboarding from './src/Onboarding.svelte';
 	import { init } from './src/settings.svelte.ts';
+	import { listen } from './src/commands.svelte.ts';
 	import { load, save } from './src/store.ts';
 
 	init();
+	// The one window key handler; every shortcut is a command in the registry (src/commands.svelte.ts).
+	$effect(listen);
 	let onboarded = $state(load().onboarded === true);
 
 	function set_onboarded(value: boolean) {

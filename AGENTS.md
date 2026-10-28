@@ -100,6 +100,11 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   from Finder gets launchd's minimal one.
 - `src/store.ts` — state kept between runs (`onboarded`, `settings`), as JSON in
   `$XDG_CONFIG_HOME/gitbox` (default `~/.config/gitbox/state.json`).
+- `src/commands.svelte.ts` — every command in one registry (#4): id, title, menu group, keys,
+  `when`, `checked`, `run`. Components `register()` theirs in an `$effect`; `listen()`, called once
+  in `App.svelte`, is the only app-wide key handler (dialogs keep their own Escape/Enter). A single
+  key, or a command with `skip_editing`, doesn't run while a text field has focus. `caps()` draws
+  keys; `src/Shortcuts.svelte` (⌘/) lists them.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.

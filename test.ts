@@ -39,6 +39,8 @@ else if (cmd === 'api user --jq {login, avatar_url}') {
 } else if (cmd === 'api notifications?per_page=1') console.log('[]');
 else if (page) {
 	if (!process.env.FAKE_AUTHED) { console.error('HTTP 401: Bad credentials'); process.exit(1); }
+	// The first page is where every load starts, so the test can count loads.
+	if (page[1] === '1' && process.env.FAKE_LOG) require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd }) + '\\n');
 	const from = (page[1] - 1) * 50 + 1;
 	const to = Math.min(from + 49, 290);
 	console.log(JSON.stringify(Array.from({ length: Math.max(to - from + 1, 0) }, (_, k) => note(from + k))));
@@ -413,6 +415,38 @@ check('Open past 10 tabs asks first, and Cancel opens nothing', opened() === bef
 press('escape');
 await wait_for(() => picked().length === 0, { label: 'Escape clears it all' });
 
+// Commands (#4): every shortcut runs a command from the registry.
+const loads = () => calls().filter((c) => c.cmd === 'api notifications?per_page=50&page=1').length;
+const loads_before = loads();
+press('cmd-r');
+await wait_for(() => loads() > loads_before, { label: '⌘R' });
+check('⌘R refreshes, through the registry', loads() === loads_before + 1);
+await wait_for(() => !text().includes('loading…'), { label: 'the refresh settles' });
+press('cmd-2');
+await wait_for(() => !has('Requested'), { label: '⌘2 hides Requested' });
+check('⌘2 hides the second lane, and only it', !has('Requested') && has('Todo') && has('Waiting on me'));
+press('cmd-2');
+await wait_for(() => has('Requested'), { label: '⌘2 shows it again' });
+press('cmd-/');
+await wait_for(() => has('Keyboard Shortcuts'), { label: '⌘/' });
+check(
+	'⌘/ lists the shortcuts, with their keys',
+	['Refresh', 'Settings…', 'Select All Cards', 'Show Requested', 'Clear Selection'].every(has) && has('⌘') && has('R')
+);
+press('escape');
+await wait_for(() => !has('Keyboard Shortcuts'), { label: 'Escape closes the shortcuts' });
+// ⌘A in a text field selects the text, not cards.
+click_test_id('add-filter');
+await wait_for(() => has('Repository'), { label: 'the filter menu, for its search' });
+click_test_id('field-repo');
+await wait_for(() => find_test_id('filter-search') !== null, { label: 'the search box' });
+click_test_id('filter-search');
+press('cmd-a');
+await wait(100);
+check('⌘A in a text field selects no cards', !all_text().some((t) => / selected$/.test(t)));
+press('escape');
+await wait(100);
+
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
@@ -421,12 +455,12 @@ const before = behind();
 wheel({ x: 800, y: 400 }, 0, -300);
 await wait(300);
 check('a scroll over the settings leaves the board behind still', before !== undefined && behind() === before);
-click_test_id('toggle-hide_done');
+click_test_id('toggle-hide-done');
 await wait_for(() => !has('Merged / Closed'), { label: 'the done lane hides' });
 click_test_id('lane_size-25');
 await wait_for(() => all_text().filter((t) => t === '25+').length === 3, { label: 'lanes of 25' });
 check('settings change the board at once', !has('Merged / Closed') && badges('25+') === 3);
-check('settings are saved', saved().settings.hide_done === true && saved().settings.lane_size === 25);
+check('settings are saved', saved().settings.lanes.find((l: { key: string }) => l.key === 'done').shown === false && saved().settings.lane_size === 25);
 press('escape');
 await wait_for(() => !has('Cards per lane'), { label: 'Escape closes settings' });
 
@@ -474,4 +508,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 66);
+finish('gitbox', 70);

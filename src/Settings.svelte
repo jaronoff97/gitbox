@@ -3,7 +3,7 @@
 	import { on_window_key } from 'gpuix-svelte';
 	import pkg from '../package.json' with { type: 'json' };
 	import { close } from './icons.ts';
-	import { DEFAULTS, settings, update } from './settings.svelte.ts';
+	import { DEFAULTS, lane_shown, settings, toggle_lane, update } from './settings.svelte.ts';
 	import { state_file } from './store.ts';
 
 	let { login, onclose, onsetup }: { login: string; onclose: () => void; onsetup: () => void } = $props();
@@ -25,7 +25,13 @@
 	</div>
 {/snippet}
 
-{#snippet toggle(key: 'participating' | 'include_read' | 'hide_done')}
+{#snippet hide_lane(key: string)}
+	<div class="switch" class:on={!lane_shown(key)} hitbox="self" testId="toggle-hide-{key}" tabindex={0} onclick={() => toggle_lane(key)}>
+		<div class="knob" class:on={!lane_shown(key)}></div>
+	</div>
+{/snippet}
+
+{#snippet toggle(key: 'participating' | 'include_read')}
 	<div class="switch" class:on={settings[key]} hitbox="self" testId="toggle-{key}" tabindex={0} onclick={() => update({ [key]: !settings[key] })}>
 		<div class="knob" class:on={settings[key]}></div>
 	</div>
@@ -57,7 +63,7 @@
 			</div>
 			<div class="row">
 				{@render row('Hide Merged / Closed', 'Keep the board to open work.')}
-				{@render toggle('hide_done')}
+				{@render hide_lane('done')}
 			</div>
 
 			<div class="section">Notifications</div>

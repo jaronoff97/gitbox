@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { on_window_key } from 'gpuix-svelte';
 	import Tooltip from 'gpuix-svelte/components/Tooltip.svelte';
 	import { untrack } from 'svelte';
 	import Lane from './Lane.svelte';
@@ -9,10 +8,12 @@
 	import FilterMenu from './FilterMenu.svelte';
 	import { matches, type Filter } from './filters.ts';
 	import Settings from './Settings.svelte';
+	import Shortcuts from './Shortcuts.svelte';
+	import { register } from './commands.svelte.ts';
 	import * as gh from './gh.ts';
 	import { notifications, PER_PAGE, viewer, type Action, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
-	import { settings, update, type Sort } from './settings.svelte.ts';
+	import { lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
 
 	/** On macOS the toolbar is the title bar (app.ts makes it transparent) and leaves room for the traffic lights. */
 	const MAC = process.platform === 'darwin';
@@ -48,6 +49,7 @@
 	/** A refresh keeps the old cards on screen until its first pages land. */
 	let stale = $state(false);
 	let show_settings = $state(false);
+	let show_shortcuts = $state(false);
 	let menu = $state<{ list: Notification[]; x: number; y: number } | null>(null);
 	/** The selection (#3): thread ids, as the lanes are windowed and most cards aren't mounted. */
 	let selected = $state(new Set<string>());
@@ -203,7 +205,11 @@
 	let matching = $derived(items.filter((n) => matches(n, settings.filters)));
 
 	let lanes = $derived(
-		LANES.filter((l) => !(settings.hide_done && l.key === 'done')).map((l) => {
+		settings.lanes
+			.filter((s) => s.shown)
+			.map((s) => LANES.find((l) => l.key === s.key))
+			.filter((l) => l !== undefined)
+			.map((l) => {
 			const sort: Sort = settings.lane_sort[l.key] ?? 'desc';
 			const all = matching
 				.filter((n) => lane_of(n) === l.key)
@@ -323,17 +329,60 @@
 		return () => clearInterval(timer);
 	});
 
+	/** A dialog or menu is open: board keys (Escape, ⌘A, ⌘↩) leave it alone. */
+	const modal = () => dialog || menu !== null || show_settings || show_shortcuts;
+
+	// The board's commands (#4): the keys, the ⌘/ overlay, the palette and the menu bar read them.
 	$effect(() =>
-		on_window_key('keydown', (e) => {
-			if (e.key === 'escape' && !dialog && !menu && selected.size) return void (selected = new Set());
-			if (!e.modifiers?.cmd) return;
-			// In a text field ⌘A selects its text, not cards.
-			if (e.key === 'a' && !e.editing && !dialog) return select_all();
-			// In a dialog or a text field, ⌘↩ belongs to them.
-			if (e.key === 'enter' && !dialog && !e.editing) open_toast();
-			else if (e.key === 'r') start();
-			else if (e.key === ',') show_settings = true;
-		})
+		register([
+			{ id: 'app.settings', title: 'Settings…', group: 'app', keys: 'cmd-,', when: () => !show_settings, run: () => (show_settings = true) },
+			{ id: 'file.refresh', title: 'Refresh', group: 'file', keys: 'cmd-r', run: start },
+			{
+				id: 'file.open-toast',
+				title: 'Open What the Last Action Touched',
+				group: 'file',
+				keys: 'cmd-enter',
+				skip_editing: true,
+				when: () => !modal() && toasts.some((t) => t.open),
+				run: () => open_toast()
+			},
+			{ id: 'edit.select-all', title: 'Select All Cards', group: 'edit', keys: 'cmd-a', skip_editing: true, when: () => !modal(), run: select_all },
+			{
+				id: 'edit.deselect',
+				title: 'Clear Selection',
+				group: 'edit',
+				keys: 'escape',
+				when: () => !modal() && selected.size > 0,
+				run: () => (selected = new Set())
+			},
+			...LANES.map((l, i) => ({
+				id: `view.lane.${l.key}`,
+				title: `Show ${l.title}`,
+				group: 'view' as const,
+				keys: `cmd-${i + 1}`,
+				checked: () => lane_shown(l.key),
+				run: () => toggle_lane(l.key)
+			})),
+			{
+				id: 'view.include-read',
+				title: 'Include Read',
+				group: 'view',
+				checked: () => settings.include_read,
+				run: () => update({ include_read: !settings.include_read })
+			},
+			{
+				id: 'view.participating',
+				title: 'Participating Only',
+				group: 'view',
+				checked: () => settings.participating,
+				run: () => update({ participating: !settings.participating })
+			},
+			{ id: 'view.clear-filters', title: 'Clear Filters', group: 'view', keys: 'alt-cmd-f', when: () => settings.filters.length > 0, run: () => filter([]) },
+			{ id: 'help.shortcuts', title: 'Keyboard Shortcuts', group: 'help', keys: 'cmd-/', run: () => (show_shortcuts = !show_shortcuts) },
+			{ id: 'help.setup', title: 'Check gh Setup', group: 'help', run: onsetup },
+			{ id: 'help.report', title: 'Report an Issue', group: 'help', run: () => gh.open_url('https://github.com/jaronoff97/gitbox/issues/new') },
+			{ id: 'help.repo', title: 'Gitbox on GitHub', group: 'help', run: () => gh.open_url('https://github.com/jaronoff97/gitbox') }
+		])
 	);
 
 	/** The end marker's text for a lane. */
@@ -424,6 +473,10 @@
 	ondialog={(open) => (dialog = open)}
 />
 <Toast {toasts} onopen={open_toast} lift={selection.length > 0 || progress !== null} />
+
+{#if show_shortcuts}
+	<Shortcuts onclose={() => (show_shortcuts = false)} />
+{/if}
 
 {#if show_settings}
 	<Settings login={me?.login ?? ''} onclose={() => (show_settings = false)} {onsetup} />
