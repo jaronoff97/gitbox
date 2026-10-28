@@ -240,6 +240,13 @@ export function comment(n: Notification, body: string) {
 	return pipe(GH(), [kind(n), 'comment', url, '--body-file', '-'], body);
 }
 
+/** Approves a PR, for an automation (the card actions don't offer it). */
+export function approve(n: Notification) {
+	const url = web_url(n.subject.url);
+	if (!url || n.subject.type !== 'PullRequest') return Promise.reject(new Error('Only a pull request can be approved'));
+	return gh('pr', 'review', url, '--approve');
+}
+
 /** Puts `text` on the clipboard: gpuix-svelte has no clipboard call, so this is the system's tool.
  * ponytail: Linux gets Wayland's wl-copy only; add xclip when someone runs it on X11. */
 export function copy(text: string) {

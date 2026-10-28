@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { set_css_vars } from 'gpuix-svelte';
+	import Automations from './src/Automations.svelte';
 	import Board from './src/Board.svelte';
+	import { init as init_automations, watch } from './src/automations.svelte.ts';
 	import Onboarding from './src/Onboarding.svelte';
 	import { init, settings } from './src/settings.svelte.ts';
 	import { css_vars, system_dark } from './src/theme.ts';
@@ -11,6 +13,7 @@
 	import { load, save } from './src/store.ts';
 
 	init();
+	init_automations();
 	// The one window key handler; every shortcut is a command in the registry (src/commands.svelte.ts).
 	$effect(listen);
 
@@ -27,6 +30,11 @@
 	});
 	$effect(() => menubar?.set(menu_json()));
 	let onboarded = $state(load().onboarded === true);
+
+	// Automations run while gh works, whichever tab is open.
+	$effect(() => {
+		if (onboarded) return watch();
+	});
 
 	function set_onboarded(value: boolean) {
 		save({ onboarded: value });
@@ -78,7 +86,11 @@
 			<Board active={view === 'inbox'} onsetup={() => set_onboarded(false)} />
 			{#if view !== 'inbox'}
 				<div class="view">
-					<div class="header">{VIEWS.find((v) => v.key === view)?.title}</div>
+					{#if view === 'automations'}
+						<Automations />
+					{:else}
+						<div class="header">Chat</div>
+					{/if}
 				</div>
 			{/if}
 		</div>

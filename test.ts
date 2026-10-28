@@ -8,6 +8,7 @@ import { score } from './src/fuzzy.ts';
 import { menu_json } from './src/menubar.ts';
 import { palette as colors } from './src/theme.ts';
 import { link, type Notification } from './src/gh.ts';
+import { automations, check as check_automations, put } from './src/automations.svelte.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
 // pages of 50 (the last has 40), titled "Note 1" to "Note 290". Note i is PR i, and i % 4 picks
@@ -51,7 +52,7 @@ else if (page) {
 	console.log(JSON.stringify([[{ summary: 'Bad thing', html_url: 'https://github.com/octo/repo/security/advisories/GHSA-1' }]]));
 } else if (cmd === 'api https://api.github.com/repos/octo/repo/releases/1 --jq .html_url') {
 	console.log('https://github.com/octo/repo/releases/tag/v1');
-} else if ((cmd.startsWith('api -X ') && cmd.includes(' notifications/threads/')) || /^(pr|issue) (close|reopen|comment) /.test(cmd)) {
+} else if ((cmd.startsWith('api -X ') && cmd.includes(' notifications/threads/')) || /^(pr|issue) (close|reopen|comment|review) /.test(cmd)) {
 	// Card actions (#2): logged for the test to read; thread 12 refuses to be marked done.
 	const stdin = cmd.includes('--body-file -') ? require('fs').readFileSync(0, 'utf8') : undefined;
 	require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd, stdin }) + '\\n');
@@ -770,6 +771,79 @@ click(find_test_id('card-4')!);
 await wait_for(() => calls().length > calls_before, { label: 'a card opens again' });
 check('the board is back as it was', badges('50+') === 4);
 
+// Automations: a condition per row, its field from a menu, then the steps; saved in automations.json.
+const automations_json = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'automations.json'), 'utf8'));
+click_test_id('nav-automations');
+click_test_id('new-automation');
+pump();
+click_test_id('automation-name');
+type('b o b');
+click_test_id('add-condition');
+pump();
+click_test_id('cond-value-1');
+type('b o b');
+click_test_id('add-condition');
+pump();
+click_test_id('cond-field-2');
+pump();
+click_test_id('cond-pick-org');
+pump();
+click_test_id('cond-value-2');
+type('shift-o c t o');
+click_test_id('step-done');
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-editor.png'));
+click_test_id('automation-save');
+pump();
+const made = automations_json()[0];
+check(
+	'a new automation is saved with its conditions and steps',
+	made?.name === 'bob' &&
+		JSON.stringify(made.when) ===
+			JSON.stringify([
+				{ field: 'reason', value: 'review requested' },
+				{ field: 'author', value: 'bob' },
+				{ field: 'org', value: 'Octo' }
+			]) &&
+		made.then.join() === 'approve,done'
+);
+check('the list describes it', has('When reason is review requested and author is bob and organization is Octo, approve the pull request, then mark as done.'));
+
+// Saved now, it leaves the notifications already there alone; made earlier, it acts on bob's review
+// requests (4, 8 … 48 on the first page) once each. Thread 12 refuses to be marked done.
+await check_automations();
+check('a new automation leaves older notifications alone', !calls().some((c) => c.cmd.startsWith('pr review')));
+put({ ...automations.list[0], created: '2000-01-01T00:00:00.000Z' });
+await check_automations();
+const approved = calls().filter((c) => c.cmd.startsWith('pr review'));
+check('it approves each matching PR', approved.length === 12 && called('pr review https://github.com/octo/repo/pull/4 --approve'));
+check('then marks it done', called('api -X DELETE notifications/threads/48'));
+check('a failed step is in the log', saved().automation_log.filter((r: { error?: string }) => r.error).length === 1);
+await check_automations();
+check('it acts on a thread once', calls().filter((c) => c.cmd.startsWith('pr review')).length === 12);
+pump();
+check('the activity lists what it did', has('Note 48') && text().includes('HTTP 403'));
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-list.png'));
+
+click_test_id(`automation-${made.id}`);
+pump();
+click_test_id('automation-enabled');
+click_test_id('automation-save');
+pump();
+check('a change is saved', automations_json()[0].enabled === false);
+click_test_id(`automation-${made.id}`);
+pump();
+click_test_id('automation-delete');
+pump();
+check('Delete removes it', automations_json().length === 0 && has('No automations yet. Make one to approve, read or clear notifications as they arrive.'));
+click_test_id('new-automation');
+pump();
+click_test_id('cond-remove-0');
+click_test_id('automation-save');
+pump();
+check('an automation needs a condition', text().includes('Add a condition') && automations_json().length === 0);
+click_test_id('automation-cancel');
+press('ctrl-1');
+
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
 	({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
@@ -791,4 +865,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 102);
+finish('gitbox', 113);
