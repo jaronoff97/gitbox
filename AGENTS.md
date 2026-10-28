@@ -84,7 +84,18 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 ## Files
 
 - `app.ts` — the entry: `render_hot` opens the window and remounts `App.svelte` on save.
-- `App.svelte` — the root component.
-- `test.ts` — the headless test (`gpuix-svelte/test`); a plain script that exits 1 on failure.
+- `App.svelte` — the root component: the palette, then onboarding until it passes, then the list.
+- `src/gh.ts` — every call to the `gh` CLI, and the onboarding checks. Each page of notifications
+  gets the PR or issue state from one batched GraphQL call.
+- `src/store.ts` — state kept between runs (`onboarded`), as JSON in `$XDG_CONFIG_HOME/gitbox`
+  (default `~/.config/gitbox/state.json`).
+- `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.
+- `src/Notifications.svelte` — a board of the signed-in user's unread notifications in four lanes
+  (Todo, Requested, Waiting on me, Merged / Closed; `lane_of` sorts them). Each lane starts with 50
+  cards; a scroll near a lane's end shows 50 more in that lane only, and fetches API pages only if
+  they are not loaded yet. The header's repository menu filters every lane to the picked repos.
+- `test.ts` — the headless test (`gpuix-svelte/test`); a plain script that exits 1 on failure. It
+  puts a fake `gh` first on `PATH` and points `XDG_CONFIG_HOME` at a temp dir, so it needs no
+  GitHub account and leaves the real saved state alone.
 - `standalone.ts`, `build.ts` — the entry and the Bun build script behind `npm run build`.
 - `tsconfig.json`, `svelte.d.ts`, `svelte.config.js` — TypeScript and svelte-check setup.
