@@ -1,8 +1,13 @@
 // Every GitHub call goes through the local `gh` CLI, so the app holds no token of its own.
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
+
+// An app started from Finder or the Dock gets launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin), which
+// misses where Homebrew and Linuxbrew put gh. Appended, so a gh earlier on a real PATH still wins.
+const EXTRA_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin'];
+const env = () => ({ ...process.env, PATH: [process.env.PATH, ...EXTRA_PATH].filter(Boolean).join(':') });
 
 export type Notification = {
 	id: string;
@@ -10,24 +15,72 @@ export type Notification = {
 	unread: boolean;
 	updated_at: string;
 	subject: { title: string; type: string; url: string | null };
-	repository: { full_name: string };
-	/** OPEN, CLOSED or MERGED for a PR or issue, looked up with the page; undefined for others. */
+	repository: { full_name: string; html_url: string; owner: { login: string; avatar_url: string } };
+	// Looked up with the page for a PR or issue; undefined for other subjects.
+	/** OPEN, CLOSED or MERGED. */
 	state?: string;
+	draft?: boolean;
+	author?: string;
+	labels?: { name: string; color: string }[];
+	/** PRs only: how many reviews, and the outcome of the latest review from each reviewer. */
+	reviews?: number;
+	review?: 'approved' | 'changes requested' | 'commented' | 'none';
 };
+
+// reviewDecision would say the same as latestReviews, but GitHub works it out from branch rules,
+// which made a page of 50 take 4 s more; latestReviews costs about 0.2 s.
+const FRAGMENT = `
+	... on PullRequest { state isDraft author { login } labels(first: 20) { nodes { name color } }
+		reviews { totalCount } latestReviews(first: 20) { nodes { state } } }
+	... on Issue { state author { login } labels(first: 20) { nodes { name color } } }`;
+
+type Subject = {
+	state: string;
+	isDraft?: boolean;
+	author: { login: string } | null;
+	labels: { nodes: { name: string; color: string }[] };
+	reviews?: { totalCount: number };
+	latestReviews?: { nodes: { state: string }[] };
+};
+
+/** Copies what GraphQL found for a subject onto its notification. */
+function enrich(n: Notification, s: Subject | null | undefined) {
+	if (!s) return;
+	n.state = s.state;
+	n.draft = s.isDraft;
+	n.author = s.author?.login;
+	n.labels = s.labels.nodes;
+	if (s.reviews) {
+		const states = s.latestReviews?.nodes.map((r) => r.state) ?? [];
+		n.reviews = s.reviews.totalCount;
+		n.review = states.includes('CHANGES_REQUESTED')
+			? 'changes requested'
+			: states.includes('APPROVED')
+				? 'approved'
+				: n.reviews > 0
+					? 'commented'
+					: 'none';
+	}
+}
 
 export type Check = { label: string; hint: string; run: () => Promise<string> };
 
 /** Runs `gh` and returns stdout; rejects with stderr (or the spawn error) on failure. */
 export async function gh(...args: string[]): Promise<string> {
 	try {
-		const { stdout } = await exec('gh', args, { maxBuffer: 64 * 1024 * 1024 });
+		const { stdout } = await exec('gh', args, { maxBuffer: 64 * 1024 * 1024, env: env() });
 		return stdout.trim();
 	} catch (e) {
 		const err = e as { code?: string; stderr?: string; stdout?: string; message: string };
-		if (err.code === 'ENOENT') throw new Error('gh was not found on PATH');
+		if (err.code === 'ENOENT') throw new Error(`gh was not found on PATH or in ${EXTRA_PATH.join(', ')}`);
 		// GraphQL exits 1 when some fields fail, yet still prints the data it got.
 		throw Object.assign(new Error(err.stderr?.trim() || err.message), { stdout: err.stdout });
 	}
+}
+
+/** The signed-in user. */
+export async function viewer(): Promise<{ login: string; avatar_url: string }> {
+	return JSON.parse(await gh('api', 'user', '--jq', '{login, avatar_url}'));
 }
 
 /** The onboarding steps, in order; each resolves to a short detail line or rejects. */
@@ -40,7 +93,7 @@ export const checks: Check[] = [
 	{
 		label: 'Signed in to GitHub',
 		hint: 'Run `gh auth login` in a terminal',
-		run: async () => `as ${await gh('api', 'user', '--jq', '.login')}`
+		run: async () => `as ${(await viewer()).login}`
 	},
 	{
 		label: 'Notifications readable',
@@ -58,16 +111,21 @@ export function web_url(api: string | null): string | null {
 }
 
 /**
- * One page (from 1) of the signed-in user's unread notifications, newest first, with `state` set.
+ * One page (from 1) of the signed-in user's notifications, newest first, enriched: unread
+ * only unless `all`, and only threads they take part in if `participating`.
  * GraphQL has no notifications, so the list is REST; its subjects carry no node id for `nodes()`,
- * so the states come from one aliased `resource(url:)` query per page, a direct lookup by URL.
+ * so the rest comes from one aliased `resource(url:)` query per page, a direct lookup by URL.
  */
-export async function notifications(page: number): Promise<Notification[]> {
-	const list: Notification[] = JSON.parse(await gh('api', `notifications?per_page=${PER_PAGE}&page=${page}`));
+export async function notifications(
+	page: number,
+	{ all = false, participating = false }: { all?: boolean; participating?: boolean } = {}
+): Promise<Notification[]> {
+	const query = `per_page=${PER_PAGE}&page=${page}${all ? '&all=true' : ''}${participating ? '&participating=true' : ''}`;
+	const list: Notification[] = JSON.parse(await gh('api', `notifications?${query}`));
 	// One GraphQL call for the whole page: an alias per PR or issue.
 	const fields = list.map((n, i) => {
 		const url = web_url(n.subject.url);
-		return url ? `a${i}: resource(url: ${JSON.stringify(url)}) { ... on PullRequest { state } ... on Issue { state } }` : '';
+		return url ? `a${i}: resource(url: ${JSON.stringify(url)}) { ${FRAGMENT} }` : '';
 	});
 	if (fields.some(Boolean)) {
 		let out: string;
@@ -79,7 +137,44 @@ export async function notifications(page: number): Promise<Notification[]> {
 			if (!out) throw e;
 		}
 		const data = JSON.parse(out).data || {};
-		list.forEach((n, i) => (n.state = data[`a${i}`]?.state));
+		list.forEach((n, i) => enrich(n, data[`a${i}`]));
 	}
 	return list;
+}
+
+// Each repository's security advisories, fetched once, on the first advisory card opened there.
+const advisories = new Map<string, Promise<{ summary: string; html_url: string }[]>>();
+
+/** The page to open for a notification, as close to its subject as the API allows. */
+export async function link(n: Notification): Promise<string> {
+	const repo = n.repository.html_url;
+	const web = web_url(n.subject.url);
+	if (web) return web;
+	try {
+		// The notification has no URL for an advisory, but its title is the advisory's summary. Only
+		// maintainers see draft and triage advisories; others get the repository's advisory list.
+		if (n.subject.type === 'RepositoryAdvisory') {
+			const name = n.repository.full_name;
+			if (!advisories.has(name)) {
+				const all = gh('api', '--paginate', '--slurp', `repos/${name}/security-advisories?per_page=100`);
+				advisories.set(name, all.then((out) => JSON.parse(out).flat(), () => []));
+			}
+			const found = (await advisories.get(name)!).find((a) => a.summary === n.subject.title);
+			return found?.html_url ?? `${repo}/security/advisories`;
+		}
+		// Releases, commits and the like: their API object knows its page.
+		if (n.subject.url) return (await gh('api', n.subject.url, '--jq', '.html_url')) || repo;
+	} catch {
+		return repo;
+	}
+	if (n.subject.type === 'CheckSuite') return `${repo}/actions`;
+	if (n.subject.type === 'Discussion') return `${repo}/discussions`;
+	return repo;
+}
+
+/** Opens `url` in the default browser. */
+export function open_url(url: string) {
+	const [cmd, args]: [string, string[]] =
+		process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]];
+	spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
 }

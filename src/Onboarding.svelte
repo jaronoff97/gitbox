@@ -28,6 +28,9 @@
 </script>
 
 <div class="card">
+	<div class="mark">
+		{#each ['muted', 'warn', 'accent', 'merged'] as tone (tone)}<div class="bar" style="background-color: var(--{tone})"></div>{/each}
+	</div>
 	<div class="title">Welcome to gitbox</div>
 	<div class="sub">gitbox reads your GitHub notifications through the gh CLI. Checking your setup:</div>
 
@@ -63,6 +66,16 @@
 		border-width: 1px;
 		border-color: var(--border);
 		background-color: var(--surface);
+	}
+	.mark {
+		display: flex;
+		gap: 4px;
+		height: 28px;
+	}
+	.bar {
+		width: 7px;
+		height: 28px;
+		border-radius: 3px;
 	}
 	.title {
 		font-size: 22px;

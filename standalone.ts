@@ -4,7 +4,10 @@ import { render } from 'gpuix-svelte';
 import App from './App.svelte';
 
 render(App, {
-	title: 'gitbox',
+	title: 'Gitbox',
+	appName: 'Gitbox',
 	width: 1280,
-	height: 800
+	height: 800,
+	minWidth: 960,
+	minHeight: 560
 });

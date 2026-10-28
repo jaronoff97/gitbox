@@ -1,45 +1,59 @@
-# gpuix-svelte starter
+<p align="center"><img src="assets/icon.png" width="128" alt="gitbox"></p>
 
-The smallest project that consumes `gpuix-svelte` from npm: a counter in a native GPUI window.
-`npm create gpuix-svelte@latest` copies it into a new directory; then:
+# gitbox
+
+Your GitHub notifications as a board, in a native desktop window. gitbox reads them through the
+[GitHub CLI](https://cli.github.com), so it holds no token of its own.
+
+The board puts unread notifications in four lanes:
+
+| Lane | Holds |
+|---|---|
+| Todo | Everything else: comments, subscriptions, state changes, CI. |
+| Requested | Review requests. |
+| Waiting on me | Mentions, team mentions, assignments, and activity on threads you opened. |
+| Merged / Closed | Any notification whose PR or issue is merged or closed. |
+
+A click on a card opens it in the browser. Each lane loads more cards as you scroll it. The filter
+row narrows the board by repository, type, state, label, review count, review status, reason or
+author, with a chip for each filter. The settings (⌘,) change the lane size, the auto-refresh, the
+API query and more.
+
+## Install
+
+1. Install the GitHub CLI and sign in: `brew install gh`, then `gh auth login`.
+2. Download the `.dmg` from the [releases](https://github.com/jaronoff97/gitbox/releases), open
+   it, and drag Gitbox to Applications.
+3. The app is not notarized yet, so macOS blocks it at first. Allow it under System Settings →
+   Privacy & Security → "Open Anyway".
+
+At its first start, gitbox checks that `gh` is installed, signed in, and can read notifications.
+It shows the fix for a step that fails. Settings and the onboarding state are saved in
+`~/.config/gitbox/state.json`.
+
+## Develop
+
+Needs Node 24 or later, or Bun 1.4 or later. `source bin/activate-hermit` puts both on your
+`PATH`.
 
 ```bash
-npm install          # gpuix-svelte brings its own Svelte build
-npm start            # opens the window; edit App.svelte and save to hot-reload
-npm test             # headless: mounts App.svelte, clicks through GPUI's real hit testing
-npm run typecheck    # tsc --noEmit, then svelte-check over App.svelte against GPUI's element types
-npm run build        # dist/app (dist/app.exe on Windows), one executable for this platform; needs Bun
+npm install
+npm start            # opens the window (as "Gitbox Dev", with an inverted icon, on macOS); saving a .svelte file hot-reloads it
+npm test             # headless test against a fake gh
+npm run typecheck
+npm run build        # dist/gitbox, and on macOS dist/Gitbox.app and a .dmg; needs Bun
 ```
 
-Every script runs through the `gpuix-svelte` bin, which starts Node (or Bun, under
-`bun run start` / `gpuix-svelte --bun app.ts`) with the module conditions Svelte's custom
-renderer needs and the `.svelte` loader installed. Spelled out:
+A change to a `.ts` file needs a restart of `npm start`.
 
-```bash
-node --conditions custom-renderer --conditions development --import gpuix-svelte/register app.ts
-bun  --conditions custom-renderer --conditions development --preload gpuix-svelte/plugin app.ts
-```
+## Release
 
-`bunfig.toml` carries the same preload for ad-hoc `bun file.ts` runs.
+Set the version in `package.json`, then push a tag such as `v0.1.0`. The release workflow builds
+the `.dmg` on macOS and attaches it to a GitHub release.
 
-## Files
+To sign and notarize, set `CODESIGN_IDENTITY` (a Developer ID Application certificate) and
+`NOTARY_PROFILE` (a `notarytool` keychain profile) when you run `npm run build`. `build.ts`
+explains both.
 
-- `app.ts` — the entry: `render_hot` opens the window and remounts `App.svelte` on every save.
-- `App.svelte` — the component. Styling is a `<style>` block of class rules; see
-  [docs/styling.md](https://github.com/khromov/gpuix-svelte/blob/main/docs/styling.md) for what
-  CSS reaches GPUI.
-- `standalone.ts` and `build.ts` — `npm run build` compiles `standalone.ts` into one executable
-  with Bun. It is built for the machine it runs on, so build on macOS, Windows and Linux in turn
-  (a CI matrix, say) to ship all three.
-- `test.ts` — a headless test through `gpuix-svelte/test`; plain script, exits 1 on failure.
-  Runs on macOS and Windows, where the headless renderer is built.
-- `svelte.d.ts` — declares `*.svelte` modules for `tsc`.
-- `tsconfig.json` — `nodenext`, and a `paths` entry so `tsc` finds the Svelte that is nested
-  inside the package.
-  `svelteOptions.namespace` and the `gpuix-svelte/html` type entry make the editor and
-  svelte-check type `App.svelte`'s markup as GPUI elements rather than DOM ones.
-- `AGENTS.md` — instructions for coding agents, pointing at the docs' `llms.txt`; `CLAUDE.md`
-  imports it for Claude Code.
-- `svelte.config.js` — editor and svelte-check only: switches off Svelte's DOM a11y advice.
-
-Needs Node >= 24 or Bun >= 1.4.
+Built with [gpuix-svelte](https://github.com/khromov/gpuix-svelte): Svelte 5 rendered by GPUI.
+Icons are [Octicons](https://github.com/primer/octicons) (MIT).

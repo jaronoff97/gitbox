@@ -1,10 +1,10 @@
 {
 	"name": "gitbox",
 	"private": true,
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"type": "module",
 	"scripts": {
-		"start": "gpuix-svelte app.ts",
+		"start": "gpuix-svelte dev.ts",
 		"test": "gpuix-svelte test.ts",
 		"build": "bun build.ts",
 		"typecheck": "tsc --noEmit && svelte-check --diagnostic-sources js,svelte --fail-on-warnings"

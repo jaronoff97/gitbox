@@ -84,18 +84,42 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 ## Files
 
 - `app.ts` — the entry: `render_hot` opens the window and remounts `App.svelte` on save.
-- `App.svelte` — the root component: the palette, then onboarding until it passes, then the list.
-- `src/gh.ts` — every call to the `gh` CLI, and the onboarding checks. Each page of notifications
-  gets the PR or issue state from one batched GraphQL call.
-- `src/store.ts` — state kept between runs (`onboarded`), as JSON in `$XDG_CONFIG_HOME/gitbox`
-  (default `~/.config/gitbox/state.json`).
+- `dev.ts` — what `npm start` runs: `app.ts` as the gpuix-svelte bin would, but on macOS from a hard
+  link to the runtime inside `dist/dev/Gitbox Dev.app`, so the Dock and menu bar show "Gitbox Dev"
+  with the icon inverted (rendered from `assets/icon.svg` through an SVG colour filter) rather than
+  "bun" or "node". `npm run build` deletes `dist/`; the next start makes it again.
+- `bundle.ts` — the macOS `.app` wrapper (`Info.plist`, `.icns` from `assets/icon.png`) that
+  `dev.ts` and `build.ts` share.
+- `App.svelte` — the root component: the palette, then onboarding until it passes, then the board.
+- `src/gh.ts` — every call to the `gh` CLI, the onboarding checks, and `open_url`. Each page of
+  notifications gets its PRs' and issues' state, draft flag, author, labels and reviews from one
+  batched GraphQL call (GraphQL has no notifications; `reviewDecision` is left out, as it made a
+  page 4 s slower). `gh` runs with Homebrew's directories added to `PATH`, since an app started
+  from Finder gets launchd's minimal one.
+- `src/store.ts` — state kept between runs (`onboarded`, `settings`), as JSON in
+  `$XDG_CONFIG_HOME/gitbox` (default `~/.config/gitbox/state.json`).
+- `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
+  `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.
-- `src/Notifications.svelte` — a board of the signed-in user's unread notifications in four lanes
-  (Todo, Requested, Waiting on me, Merged / Closed; `lane_of` sorts them). Each lane starts with 50
-  cards; a scroll near a lane's end shows 50 more in that lane only, and fetches API pages only if
-  they are not loaded yet. The header's repository menu filters every lane to the picked repos.
+- `src/Board.svelte` — the header and a board of the signed-in user's notifications in four lanes
+  (Todo, Requested, Waiting on me, Merged / Closed; `lane_of` sorts them). Each lane starts with
+  `lane_size` cards; a scroll near a lane's end shows that many more in that lane only, and fetches
+  API pages only if they are not loaded yet.
+- `src/filters.ts` — the board filters (repository, type, state, label, reviews, review status,
+  reason, author): any value of one field, and every field. `matches` is what the lanes use.
+- `src/FilterBar.svelte` — the row under the header: a menu to add filters (a field, then its
+  values with counts) and a chip for each filter applied.
+- `src/Card.svelte` — one notification; a click or Enter opens `link(n)` in the browser: the PR or
+  issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
+  the subject's API object names.
+- `src/Settings.svelte` — the settings dialog (⌘, opens it; ⌘R refreshes the board).
+- `src/icons.ts` — Octicons as raw markup for `<svg source>`, which a compiled binary needs.
+- `assets/icon.svg`, `assets/icon.png` — the app icon and its 1024 px render (see `build.ts`).
 - `test.ts` — the headless test (`gpuix-svelte/test`); a plain script that exits 1 on failure. It
   puts a fake `gh` first on `PATH` and points `XDG_CONFIG_HOME` at a temp dir, so it needs no
-  GitHub account and leaves the real saved state alone.
-- `standalone.ts`, `build.ts` — the entry and the Bun build script behind `npm run build`.
+  GitHub account and leaves the real saved state alone. It never clicks a card, which would open
+  a browser.
+- `standalone.ts`, `build.ts` — the entry and the Bun build script behind `npm run build`; on
+  macOS it also makes `dist/Gitbox.app` and a `.dmg`, signed from `CODESIGN_IDENTITY`.
+- `.github/workflows/release.yml` — a `v*` tag builds the `.dmg` and attaches it to a release.
 - `tsconfig.json`, `svelte.d.ts`, `svelte.config.js` — TypeScript and svelte-check setup.
