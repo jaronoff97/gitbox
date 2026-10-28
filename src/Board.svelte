@@ -48,7 +48,14 @@
 	/** A refresh keeps the old cards on screen until its first pages land. */
 	let stale = $state(false);
 	let show_settings = $state(false);
-	let menu = $state<{ n: Notification; x: number; y: number } | null>(null);
+	let menu = $state<{ list: Notification[]; x: number; y: number } | null>(null);
+	/** The selection (#3): thread ids, as the lanes are windowed and most cards aren't mounted. */
+	let selected = $state(new Set<string>());
+	/** The last card clicked into the selection, where a ⇧-click range starts. */
+	let anchor: string | null = null;
+	/** The lane under the pointer, for ⌘A. */
+	let hover_lane: string | null = null;
+	let progress = $state<{ verb: string; done: number; total: number } | null>(null);
 	/** A card action's dialog is open: ⌘↩ is its key then (the comment dialog sends with it). */
 	let dialog = $state(false);
 	type Note = { id: number; text: string; error: boolean; open?: () => void };
@@ -82,6 +89,20 @@
 		comment: { run: (n, body) => gh.comment(n, body ?? ''), done: 'Comment posted', verb: 'post the comment' }
 	};
 
+	/** Changes the board for `action` on `n` now, before gh answers; returns what puts it back. */
+	function apply(action: Change, n: Notification): () => void {
+		const before = { unread: n.unread, state: n.state };
+		// Read stays on the board only while it shows read notifications.
+		const remove = action === 'done' || action === 'unsubscribe' || (action === 'read' && !settings.include_read);
+		const at = items.indexOf(n);
+		if (remove && at >= 0) items.splice(at, 1);
+		else if (action === 'read') n.unread = false;
+		else if (action === 'close' || action === 'close-not-planned') n.state = 'CLOSED';
+		else if (action === 'reopen') n.state = 'OPEN';
+		// Lanes sort by time, so where it goes back in `items` doesn't change where it shows.
+		return () => (remove && at >= 0 ? items.push(n) : Object.assign(n, before));
+	}
+
 	/** Runs a card action: the board changes at once, and changes back if gh fails. */
 	async function act(action: Action, n: Notification, body?: string): Promise<boolean> {
 		try {
@@ -94,14 +115,7 @@
 		} catch (e) {
 			return (toast((e as Error).message, true), false);
 		}
-		const at = items.indexOf(n);
-		const before = { unread: n.unread, state: n.state };
-		// Read stays on the board only while it shows read notifications.
-		const remove = action === 'done' || action === 'unsubscribe' || (action === 'read' && !settings.include_read);
-		if (remove && at >= 0) items.splice(at, 1);
-		else if (action === 'read') n.unread = false;
-		else if (action === 'close' || action === 'close-not-planned') n.state = 'CLOSED';
-		else if (action === 'reopen') n.state = 'OPEN';
+		const undo = apply(action, n);
 		try {
 			const out = await ACTIONS[action].run(n, body);
 			// gh prints a new comment's URL; anything else opens the PR or issue.
@@ -109,12 +123,79 @@
 			toast(ACTIONS[action].done, false, () => (url ? gh.open_url(url) : void gh.link(n).then(gh.open_url)));
 			return true;
 		} catch (e) {
-			if (remove && at >= 0) items.splice(Math.min(at, items.length), 0, n);
-			else Object.assign(n, before);
+			undo();
 			toast(`Could not ${ACTIONS[action].verb}: ${(e as Error).message}`, true);
 			return false;
 		}
 	}
+
+	/** An action on several cards (#3): all change at once, the calls run 4 at a time with progress
+	 * in the selection bar, and only the cards whose calls fail change back and stay selected. */
+	async function bulk(action: Action, list: Notification[]): Promise<boolean> {
+		if (action === 'open') {
+			for (const n of list) gh.link(n).then(gh.open_url);
+			return true;
+		}
+		if (action === 'copy') {
+			const urls = await Promise.all(list.map(gh.link));
+			return gh.copy(urls.join('\n')).then(
+				() => (toast(`Copied ${list.length} links`), true),
+				(e: Error) => (toast(e.message, true), false)
+			);
+		}
+		if (action === 'comment') return false;
+		const undo = new Map(list.map((n) => [n, apply(action, n)]));
+		progress = { verb: DOING[action](list.length), done: 0, total: list.length };
+		const failed = await gh.pool(list, 4, (n) => ACTIONS[action].run(n).finally(() => progress && progress.done++));
+		progress = null;
+		for (const { item } of failed) undo.get(item)!();
+		selected = new Set(failed.map((f) => f.item.id));
+		if (failed.length)
+			toast(`${failed.length} of ${list.length} failed: ${failed[0].error.message}`, true);
+		else toast(`${ACTIONS[action].done} (${list.length})`);
+		return failed.length === 0;
+	}
+
+	/** The selection bar's text while a bulk action runs: "Marking 40 as done". */
+	const DOING: Record<Change, (k: number) => string> = {
+		read: (k) => `Marking ${k} as read`,
+		done: (k) => `Marking ${k} as done`,
+		unsubscribe: (k) => `Unsubscribing from ${k}`,
+		close: (k) => `Closing ${k}`,
+		'close-not-planned': (k) => `Closing ${k}`,
+		reopen: (k) => `Reopening ${k}`,
+		comment: (k) => `Commenting on ${k}`
+	};
+
+	/** ⌘-click toggles `n`; ⇧-click adds the range from the anchor, by the lane's order. */
+	function select(n: Notification, how: 'toggle' | 'range') {
+		const lane = lanes.find((l) => l.cards.includes(n));
+		const from = lane?.cards.findIndex((c) => c.id === anchor) ?? -1;
+		const next = new Set(selected);
+		if (how === 'range' && lane && from >= 0) {
+			const to = lane.cards.indexOf(n);
+			for (const c of lane.cards.slice(Math.min(from, to), Math.max(from, to) + 1)) next.add(c.id);
+		} else if (next.has(n.id)) next.delete(n.id);
+		else next.add(n.id);
+		anchor = n.id;
+		selected = next;
+	}
+
+	/** ⌘A: the lane under the pointer; again, when it is all selected, the whole board. */
+	function select_all() {
+		const lane = lanes.find((l) => l.key === hover_lane);
+		const lane_ids = lane?.cards.map((n) => n.id) ?? [];
+		const whole = !lane || lane_ids.every((id) => selected.has(id));
+		selected = new Set(whole ? lanes.flatMap((l) => l.cards.map((n) => n.id)) : [...selected, ...lane_ids]);
+	}
+
+	/** A right click on a selected card acts on the whole selection; on another card, on that card. */
+	function open_menu(n: Notification, x: number, y: number) {
+		menu = { list: selected.has(n.id) && selected.size > 1 ? selection : [n], x, y };
+	}
+
+	const run_action = (action: Action, list: Notification[], body?: string) =>
+		list.length === 1 ? act(action, list[0], body) : bulk(action, list);
 	let me = $state<{ login: string; avatar_url: string } | null>(null);
 
 	viewer().then((v) => (me = v), () => {});
@@ -134,6 +215,16 @@
 			return { ...l, sort, waiting, loaded: all.length, target: want, cards: waiting ? [] : all.slice(0, want) };
 		})
 	);
+	/** The selected cards, in board order. */
+	let selection = $derived(lanes.flatMap((l) => l.cards).filter((n) => selected.has(n.id)));
+
+	// A filter, a refresh or a sort can hide selected cards; they leave the selection.
+	$effect(() => {
+		const shown = new Set(selection.map((n) => n.id));
+		if (shown.size !== untrack(() => selected.size)) selected = shown;
+	});
+
+
 
 	/** Fetches pages, `settings.batch` at once, while some lane wants more cards than are loaded for it. */
 	async function fill() {
@@ -234,7 +325,10 @@
 
 	$effect(() =>
 		on_window_key('keydown', (e) => {
+			if (e.key === 'escape' && !dialog && !menu && selected.size) return void (selected = new Set());
 			if (!e.modifiers?.cmd) return;
+			// In a text field ⌘A selects its text, not cards.
+			if (e.key === 'a' && !e.editing && !dialog) return select_all();
 			// In a dialog or a text field, ⌘↩ belongs to them.
 			if (e.key === 'enter' && !dialog && !e.editing) open_toast();
 			else if (e.key === 'r') start();
@@ -310,15 +404,26 @@
 				sort={lane.sort}
 				reset={`${epoch}:${lane.sort}`}
 				onsort={() => flip(lane.key)}
-				onmenu={(n, x, y) => (menu = { n, x, y })}
+				onmenu={open_menu}
+				{selected}
+				onselect={select}
+				onhover={() => (hover_lane = lane.key)}
 				ongrow={() => !error && grow(lane.key)}
 			/>
 		{/each}
 	</div>
 </div>
 
-<CardActions target={menu} onclose={() => (menu = null)} onrun={act} ondialog={(open) => (dialog = open)} />
-<Toast {toasts} onopen={open_toast} />
+<CardActions
+	target={menu}
+	{selection}
+	{progress}
+	onclose={() => (menu = null)}
+	onrun={run_action}
+	onclear={() => (selected = new Set())}
+	ondialog={(open) => (dialog = open)}
+/>
+<Toast {toasts} onopen={open_toast} lift={selection.length > 0 || progress !== null} />
 
 {#if show_settings}
 	<Settings login={me?.login ?? ''} onclose={() => (show_settings = false)} {onsetup} />

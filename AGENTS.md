@@ -120,9 +120,14 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   `onvisiblerange`). GPUI paints the thumb; a strip over it scrolls with `scrollToItem` when dragged.
   GPUI reports no visible range after `scrollToItem`, so a jump moves the window itself. Headless,
   a list draws a wheel scroll only on a later frame, so tests wheel in steps and pump.
-- `src/CardActions.svelte` — a card's context menu (right click, or Shift+F10 on a focused card) and
-  its two dialogs: Close asks first, Comment takes the text. `act()` in `Board.svelte` runs the
-  action: the board changes at once and changes back, with a toast, if `gh` fails. The `gh` calls
+- `src/CardActions.svelte` — the actions on cards, always on a list: a card's context menu (right
+  click, or Shift+F10), the selection bar, and their dialogs (Close and opening over 10 tabs ask
+  first; Comment takes the text). In `Board.svelte`, `apply()` changes the board for one card and
+  returns its undo; `act()` runs one card (with a ⌘↩ toast), `bulk()` several, 4 calls at a time
+  through `gh.pool`, with progress in the bar, undoing only the cards whose calls fail.
+- Selection (#3) is a set of thread ids on the board, as the lanes are windowed: ⌘-click toggles,
+  ⇧-click adds a range in the lane's order, ⌘A takes the lane under the pointer and then the board,
+  Escape clears. Cards that a filter, refresh or sort hides leave it. The `gh` calls
   (`mark_read`, `mark_done`, `unsubscribe`, `set_state`, `comment`, `copy`) are in `src/gh.ts`;
   a comment goes to `gh` through stdin.
 - `src/Toast.svelte` — short messages at the bottom of the window.

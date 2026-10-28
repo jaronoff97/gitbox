@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click, click_test_id, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
+import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
 import { link, type Notification } from './src/gh.ts';
@@ -51,6 +51,8 @@ else if (page) {
 	const stdin = cmd.includes('--body-file -') ? require('fs').readFileSync(0, 'utf8') : undefined;
 	require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd, stdin }) + '\\n');
 	if (cmd === 'api -X DELETE notifications/threads/12') { console.error('HTTP 403: Forbidden'); process.exit(1); }
+	// FAKE_SLOW makes each action take 400 ms, so a test can see a bulk action's progress.
+	if (process.env.FAKE_SLOW) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
 	// As gh does, a new comment's URL on stdout.
 	if (cmd.startsWith('pr comment')) console.log('https://github.com/octo/repo/pull/4#issuecomment-1');
 } else if (args[1] === 'graphql') {
@@ -311,6 +313,106 @@ press('cmd-enter');
 await wait_for(() => called('open https://github.com/octo/repo/pull/4#issuecomment-1'), { label: '⌘↩ after a comment' });
 check('⌘↩ after a comment opens the new comment', called('open https://github.com/octo/repo/pull/4#issuecomment-1'));
 
+// Multi-select (#3): ⌘-click toggles, ⇧-click adds a range in the lane, and a plain click still opens.
+const opened = () => calls().filter((c) => c.cmd.startsWith('open ')).length;
+const before_select = opened();
+click_test_id('card-6', { modifiers: 'cmd' });
+await wait_for(() => has('1 selected'), { label: 'a ⌘-click selects' });
+click_test_id('card-4', { modifiers: 'cmd' });
+click_test_id('card-28', { modifiers: 'shift' });
+await wait_for(() => has('5 selected'), { label: 'a ⇧-click range' });
+check('⇧-click selects the range in the lane order', has('4 selected') && has('5 selected'));
+click_test_id('card-16', { modifiers: 'cmd' });
+await wait_for(() => has('4 selected'), { label: 'a ⌘-click deselects' });
+check('selecting opens nothing', opened() === before_select);
+
+await scroll_lane('requested', 3);
+check('a selection keeps cards that scroll out of view', has('4 selected') && !find_test_id('card-4'));
+for (let k = 0; k < 6; k++) {
+	wheel(find_test_id('lane-requested')!, 0, 2000);
+	await wait(40);
+	pump();
+}
+await wait_for(() => find_test_id('card-4') !== null, { label: 'back at the top of Requested' });
+
+// A right click on a selected card acts on the whole selection; thread 12 refuses to be done.
+click_test_id('card-12', { button: 2 });
+await wait_for(() => has('Mark 4 as Done'), { label: 'the menu for the selection' });
+click_test_id('menu-done');
+await wait_for(() => text().includes('1 of 4 failed: HTTP 403: Forbidden'), { label: 'a bulk done with one failure' });
+check(
+	'a bulk action calls gh once for each card',
+	[6, 4, 12, 28].every((id) => called(`api -X DELETE notifications/threads/${id}`))
+);
+check(
+	'only the card whose call failed comes back, and stays selected',
+	!find_test_id('card-6') && !find_test_id('card-4') && !find_test_id('card-28') && find_test_id('card-12') !== null && has('1 selected')
+);
+press('escape');
+await wait_for(() => !has('1 selected'), { label: 'Escape clears the selection' });
+
+// Close needs open PRs or issues: a merged PR in the selection disables it.
+click_test_id('card-3', { modifiers: 'cmd' });
+click_test_id('card-32', { modifiers: 'cmd' });
+await wait_for(() => has('2 selected'), { label: 'a merged and an open PR' });
+click_test_id('bulk-close');
+await wait(100);
+check('Close is disabled while the selection has a merged PR', !has('Close 2 pull requests?'));
+click_test_id('bulk-clear');
+click_test_id('card-32', { modifiers: 'cmd' });
+click_test_id('card-36', { modifiers: 'cmd' });
+await wait_for(() => has('2 selected'), { label: 'two open PRs' });
+click_test_id('bulk-close');
+await wait_for(() => has('Close 2 pull requests?'), { label: 'the bulk close confirmation' });
+click_test_id('confirm-close');
+await wait_for(() => called('pr close https://github.com/octo/repo/pull/32') && called('pr close https://github.com/octo/repo/pull/36'), { label: 'bulk close' });
+// gh logs a call just before it exits, so the app may still be finishing: wait for the selection to clear.
+await wait_for(() => !has('2 selected'), { label: 'the bulk close finishes' });
+// They sort below the fold of Merged / Closed, so the check is that they left Requested.
+await wait_for(() => !in_lane(32, 'requested') && !in_lane(36, 'requested'), { label: 'closed PRs leave Requested' });
+check('a bulk close closes each PR and clears the selection', !has('2 selected'));
+
+click_test_id('card-10', { modifiers: 'cmd' });
+click_test_id('card-14', { modifiers: 'cmd' });
+await wait_for(() => has('2 selected'), { label: 'two todo cards' });
+click_test_id('bulk-copy');
+await wait_for(() => text().includes('Copied 2 links'), { label: 'copy links' });
+check(
+	'Copy Links puts every link on the clipboard, one a line',
+	calls().some((c) => c.cmd === 'pbcopy ' && c.stdin === 'https://github.com/octo/repo/pull/10\nhttps://github.com/octo/repo/pull/14')
+);
+click_test_id('bulk-clear');
+
+// Progress: with each call 400 ms, the bar counts them as they come back.
+process.env.FAKE_SLOW = '1';
+click_test_id('card-10', { modifiers: 'cmd' });
+click_test_id('card-14', { modifiers: 'cmd' });
+await wait_for(() => has('2 selected'), { label: 'two todo cards again' });
+click_test_id('bulk-done');
+await wait_for(() => text().includes('Marking 2 as done… 0/2'), { label: 'the bar shows progress' });
+await wait_for(() => text().includes('Marked as done (2)'), { label: 'the bulk done finishes', timeout: 4000 });
+check('a bulk action shows its progress, then a toast', !find_test_id('card-10') && !find_test_id('card-14'));
+delete process.env.FAKE_SLOW;
+
+// ⌘A: the lane under the pointer, then the whole board; Open past 10 tabs asks first.
+hover(find_test_id('lane-todo')!);
+press('cmd-a');
+const picked = () => all_text().filter((t) => / selected$/.test(t)).map((t) => parseInt(t));
+await wait_for(() => picked().length === 2, { label: '⌘A selects the lane' });
+check('⌘A selects the lane under the pointer', picked()[0] === picked()[1] && picked()[0] > 10);
+const lane_count = picked()[0];
+press('cmd-a');
+await wait_for(() => Math.max(...picked()) > lane_count, { label: '⌘A again selects the board' });
+check('⌘A again selects every card on the board', Math.max(...picked()) === picked().reduce((a, b) => a + b, 0) - Math.max(...picked()));
+const before_open = opened();
+click_test_id('bulk-open');
+await wait_for(() => /^Open \d+ tabs\?$/.test(text().split('\n').find((t) => t.startsWith('Open ') && t.endsWith('tabs?')) ?? ''), { label: 'Open asks past 10 tabs' });
+click_test_id('open-cancel');
+await wait(100);
+check('Open past 10 tabs asks first, and Cancel opens nothing', opened() === before_open);
+press('escape');
+await wait_for(() => picked().length === 0, { label: 'Escape clears it all' });
+
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
@@ -323,7 +425,7 @@ click_test_id('toggle-hide_done');
 await wait_for(() => !has('Merged / Closed'), { label: 'the done lane hides' });
 click_test_id('lane_size-25');
 await wait_for(() => all_text().filter((t) => t === '25+').length === 3, { label: 'lanes of 25' });
-check('settings change the board at once', !has('Merged / Closed') && !has('Note 120'));
+check('settings change the board at once', !has('Merged / Closed') && badges('25+') === 3);
 check('settings are saved', saved().settings.hide_done === true && saved().settings.lane_size === 25);
 press('escape');
 await wait_for(() => !has('Cards per lane'), { label: 'Escape closes settings' });
@@ -372,4 +474,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 54);
+finish('gitbox', 66);

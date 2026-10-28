@@ -5,12 +5,13 @@
 
 	/** Short messages at the bottom of the window; Board adds them and takes them away on a timer. One
 	 * that can open what its action touched shows ⌘↩ and takes a click. */
-	let { toasts, onopen }: { toasts: Toast[]; onopen: (t: Toast) => void } = $props();
+	/** `lift` raises the stack over the selection bar (#3). */
+	let { toasts, onopen, lift = false }: { toasts: Toast[]; onopen: (t: Toast) => void; lift?: boolean } = $props();
 </script>
 
 {#if toasts.length}
 	<Portal>
-		<div class="stack">
+		<div class="stack" class:lift>
 			{#each toasts as t (t.id)}
 				{#if t.open}
 					<div class="toast action" hitbox="self" testId="toast-open" onclick={() => onopen(t)}>
@@ -40,6 +41,9 @@
 		gap: 8px;
 		/* Messages only: clicks go to the board behind them. */
 		pointer-events: none;
+	}
+	.stack.lift {
+		bottom: 76px;
 	}
 	.toast {
 		max-width: 560px;
