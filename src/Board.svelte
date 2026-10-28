@@ -7,7 +7,7 @@
 	import Settings from './Settings.svelte';
 	import { notifications, PER_PAGE, viewer, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
-	import { settings, update } from './settings.svelte.ts';
+	import { settings, update, type Sort } from './settings.svelte.ts';
 
 	/** Back to onboarding, for when gh stops working after setup (a logout, say). */
 	let { onsetup }: { onsetup: () => void } = $props();
@@ -48,9 +48,15 @@
 
 	let lanes = $derived(
 		LANES.filter((l) => !(settings.hide_done && l.key === 'done')).map((l) => {
-			const all = matching.filter((n) => lane_of(n) === l.key);
+			const sort: Sort = settings.lane_sort[l.key] ?? 'desc';
+			const all = matching
+				.filter((n) => lane_of(n) === l.key)
+				.toSorted((a, b) => (sort === 'asc' ? 1 : -1) * a.updated_at.localeCompare(b.updated_at));
 			const want = target[l.key] ?? 0;
-			return { ...l, loaded: all.length, target: want, cards: all.slice(0, want) };
+			// The API sends newest first, so oldest first needs the whole lane loaded; until then it would
+			// show only the oldest of what has come so far.
+			const waiting = sort === 'asc' && more;
+			return { ...l, sort, waiting, loaded: all.length, target: want, cards: waiting ? [] : all.slice(0, want) };
 		})
 	);
 
@@ -60,7 +66,7 @@
 		const mine = run;
 		loading = true;
 		try {
-			while (more && (stale || lanes.some((l) => l.loaded < l.target))) {
+			while (more && (stale || lanes.some((l) => l.sort === 'asc' || l.loaded < l.target))) {
 				const opts = { all: settings.include_read, participating: settings.participating };
 				const pages = await Promise.all(
 					Array.from({ length: settings.batch }, (_, k) => notifications(page + k + 1, opts))
@@ -114,6 +120,14 @@
 		fill();
 	}
 
+	/** Flips lane `key` between newest and oldest first, from its top; oldest first loads the whole lane. */
+	function flip(key: string) {
+		const sort: Sort = (settings.lane_sort[key] ?? 'desc') === 'desc' ? 'asc' : 'desc';
+		update({ lane_sort: { ...settings.lane_sort, [key]: sort } });
+		target[key] = settings.lane_size;
+		fill();
+	}
+
 	/** New filters start every lane over, fetching more pages if they thin it. */
 	function filter(filters: Filter[]) {
 		update({ filters });
@@ -153,7 +167,9 @@
 
 	/** The end marker's text for a lane. */
 	const status = (lane: (typeof lanes)[number]) =>
-		loading && (stale || lane.loaded < lane.target)
+		lane.waiting
+			? 'Loading the oldest…'
+			: loading && (stale || lane.loaded < lane.target)
 			? 'Loading…'
 			: more || lane.loaded > lane.cards.length
 				? 'Scroll for more'
@@ -204,7 +220,9 @@
 				cards={lane.cards}
 				badge={`${lane.cards.length}${more || lane.loaded > lane.cards.length ? '+' : ''}`}
 				status={status(lane)}
-				reset={epoch}
+				sort={lane.sort}
+				reset={`${epoch}:${lane.sort}`}
+				onsort={() => flip(lane.key)}
 				ongrow={() => !error && grow(lane.key)}
 			/>
 		{/each}

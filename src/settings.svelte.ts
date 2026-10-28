@@ -16,7 +16,11 @@ export type Settings = {
 	refresh_minutes: number;
 	/** The board filters; none shows everything. */
 	filters: Filter[];
+	/** Each lane's order by `updated_at`; a lane not listed is newest first. */
+	lane_sort: Record<string, Sort>;
 };
+
+export type Sort = 'desc' | 'asc';
 
 export const DEFAULTS: Settings = {
 	lane_size: 50,
@@ -25,7 +29,8 @@ export const DEFAULTS: Settings = {
 	include_read: false,
 	hide_done: false,
 	refresh_minutes: 0,
-	filters: []
+	filters: [],
+	lane_sort: {}
 };
 
 export const settings: Settings = $state({ ...DEFAULTS });

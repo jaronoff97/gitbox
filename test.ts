@@ -9,7 +9,8 @@ import { link, type Notification } from './src/gh.ts';
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
 // pages of 50 (the last has 40), titled "Note 1" to "Note 290". Note i is PR i, and i % 4 picks
 // its lane: 0 review requested, 1 mention (waiting on me), 2 subscribed (todo), 3 a merged PR
-// (done). So four pages give every lane its first 50 cards, and two pages are left. Every fifth
+// (done). Note 1 is the newest, a minute apart each, as the API sends them newest first.
+// So four pages give every lane its first 50 cards, and two pages are left. Every fifth
 // note is in octo/other, the rest in octo/repo; every third has the label "bug".
 const bin = mkdtempSync(join(tmpdir(), 'gitbox-'));
 writeFileSync(
@@ -22,7 +23,7 @@ const note = (i) => ({
 	id: String(i),
 	reason: reason(i),
 	unread: true,
-	updated_at: '2026-10-27T18:56:58Z',
+	updated_at: new Date(Date.UTC(2026, 9, 27) - i * 60000).toISOString(),
 	subject: { title: 'Note ' + i, type: 'PullRequest', url: 'https://api.github.com/repos/octo/repo/pulls/' + i },
 	repository: {
 		full_name: i % 5 === 0 ? 'octo/other' : 'octo/repo',
@@ -196,10 +197,20 @@ check(
 	]) && !matches(sample, [{ field: 'state', value: 'open' }])
 );
 
+// Oldest first: Waiting on me holds 1, 5, … 289, so its oldest is Note 289, on the last page.
+click_test_id('sort-waiting');
+await wait_for(() => has('Note 289'), { label: 'Waiting on me, oldest first' });
+check(
+	'oldest first puts the oldest card of the lane at its top',
+	bounds(find_test_id('card-289')!)!.y < bounds(find_test_id('card-285')!)!.y && !has('Note 1')
+);
+check('a sort changes only its own lane', has('Note 2') && has('Note 4'));
+check('the sort is saved', saved().settings.lane_sort.waiting === 'asc');
+
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
-const behind = () => bounds(find_test_id('card-1')!)?.y;
+const behind = () => bounds(find_test_id('card-289')!)?.y;
 const before = behind();
 wheel({ x: 800, y: 400 }, 0, -300);
 await wait(300);
@@ -215,9 +226,19 @@ await wait_for(() => !has('Cards per lane'), { label: 'Escape closes settings' }
 
 await app.unmount();
 app = mount_headless(App, { width: 1280, height: 800 });
-await wait_for(() => has('Note 1'), { label: 'the board after a restart' });
+await wait_for(() => has('Note 2'), { label: 'the board after a restart' });
 check('a restart skips onboarding', !text().includes('Welcome to gitbox'));
+// With lanes of 25, the start alone loads one batch; oldest first has to load the last page too.
+await wait_for(() => has('Note 289'), { label: 'oldest first after a restart' });
+check('a saved oldest first loads its whole lane after a restart', !has('Note 1'));
 check('settings survive a restart', !has('Merged / Closed'));
+
+click_test_id('settings');
+await wait_for(() => has('Cards per lane'), { label: 'the settings dialog again' });
+click_test_id('settings-reset');
+press('escape');
+await wait_for(() => has('Note 1'), { label: 'newest first again' });
+check('Reset in Settings clears the lane sorts', Object.keys(saved().settings.lane_sort).length === 0);
 
 delete process.env.FAKE_AUTHED;
 click_test_id('refresh');
@@ -247,4 +268,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 33);
+finish('gitbox', 38);

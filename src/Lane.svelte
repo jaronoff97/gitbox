@@ -1,8 +1,11 @@
 <script lang="ts">
 	import Portal from 'gpuix-svelte/components/Portal.svelte';
+	import Tooltip from 'gpuix-svelte/components/Tooltip.svelte';
 	import { get_native, type GpuixEvent, type ShadowNode } from 'gpuix-svelte';
 	import Card from './Card.svelte';
 	import type { Notification } from './gh.ts';
+	import { sort_asc, sort_desc } from './icons.ts';
+	import type { Sort } from './settings.svelte.ts';
 
 	let {
 		key,
@@ -11,7 +14,9 @@
 		cards,
 		badge,
 		status,
+		sort,
 		reset,
+		onsort,
 		ongrow
 	}: {
 		key: string;
@@ -21,8 +26,10 @@
 		badge: string;
 		/** The end marker's text: "Loading…", "Scroll for more", "All caught up". */
 		status: string;
-		/** Changes when the board starts its lanes over (a filter, a refresh): back to the top. */
-		reset: number;
+		sort: Sort;
+		/** Changes when the board starts this lane over (a filter, a refresh, a new order): back to the top. */
+		reset: string;
+		onsort: () => void;
 		/** Called when you scroll to the end: the board shows more cards here if it has them. */
 		ongrow: () => void;
 	} = $props();
@@ -117,6 +124,19 @@
 		<div class="dot" style="background-color: var(--{tone})"></div>
 		<div class="title">{title}</div>
 		<div class="badge">{badge}</div>
+		<div class="grow"></div>
+		<Tooltip content={sort === 'asc' ? 'Oldest first' : 'Newest first'} side="bottom">
+			{#snippet children(hover)}
+				<svg
+					class="sort"
+					class:on={sort === 'asc'}
+					{...hover}
+					source={sort === 'asc' ? sort_asc : sort_desc}
+					testId="sort-{key}"
+					onclick={onsort}
+				></svg>
+			{/snippet}
+		</Tooltip>
 	</div>
 	<div class="box" {@attach (node: ShadowNode) => (box = node)}>
 		<virtual-list
@@ -176,6 +196,24 @@
 		font-size: 13px;
 		font-weight: semibold;
 		color: var(--ink);
+	}
+	.grow {
+		flex-grow: 1;
+	}
+	.sort {
+		width: 14px;
+		height: 14px;
+		padding: 4px;
+		border-radius: 5px;
+		color: var(--muted);
+		cursor: pointer;
+	}
+	.sort:hover {
+		color: var(--ink);
+		background-color: var(--surface);
+	}
+	.sort.on {
+		color: var(--accent);
 	}
 	.badge {
 		padding: 0px 7px;

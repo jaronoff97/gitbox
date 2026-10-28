@@ -31,7 +31,9 @@
 		scrim: '#00000099',
 		'popover-surface': '#1e1e2e',
 		'popover-border': '#313244',
-		'popover-ink': '#cdd6f4'
+		'popover-ink': '#cdd6f4',
+		'tooltip-surface': '#313244',
+		'tooltip-ink': '#cdd6f4'
 	});
 </script>
 

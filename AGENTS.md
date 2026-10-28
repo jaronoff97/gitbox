@@ -104,7 +104,9 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 - `src/Board.svelte` — the header and a board of the signed-in user's notifications in four lanes
   (Todo, Requested, Waiting on me, Merged / Closed; `lane_of` sorts them). Each lane starts with
   `lane_size` cards; a scroll near a lane's end shows that many more in that lane only, and fetches
-  API pages only if they are not loaded yet.
+  API pages only if they are not loaded yet. Each lane sorts newest or oldest first by `updated_at`
+  (`settings.lane_sort`); since the API sends newest first, oldest first loads the whole lane before
+  it shows a card.
 - `src/filters.ts` — the board filters (repository, type, state, label, reviews, review status,
   reason, author): any value of one field, and every field. `matches` is what the lanes use.
 - `src/FilterBar.svelte` — the row under the header: a menu to add filters (a field, then its
