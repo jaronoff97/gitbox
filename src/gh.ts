@@ -238,3 +238,17 @@ export function copy(text: string) {
 		process.platform === 'darwin' ? ['pbcopy', []] : process.platform === 'win32' ? ['clip', []] : ['wl-copy', []];
 	return pipe(cmd, args, text);
 }
+
+/** Runs `fn` on each item, `limit` at a time, and returns the ones that failed with their errors. */
+export async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<unknown>) {
+	const failed: { item: T; error: Error }[] = [];
+	let next = 0;
+	const worker = async () => {
+		while (next < items.length) {
+			const item = items[next++];
+			await fn(item).catch((error: Error) => failed.push({ item, error }));
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+	return failed;
+}

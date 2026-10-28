@@ -18,6 +18,9 @@
 		reset,
 		onsort,
 		onmenu,
+		selected,
+		onselect,
+		onhover,
 		ongrow
 	}: {
 		key: string;
@@ -32,6 +35,11 @@
 		reset: string;
 		onsort: () => void;
 		onmenu: (n: Notification, x: number, y: number) => void;
+		/** The board's selection (#3): thread ids, as most selected cards aren't mounted. */
+		selected: Set<string>;
+		onselect: (n: Notification, how: 'toggle' | 'range') => void;
+		/** The pointer entered this lane: ⌘A selects the lane under it. */
+		onhover: () => void;
 		/** Called when you scroll to the end: the board shows more cards here if it has them. */
 		ongrow: () => void;
 	} = $props();
@@ -50,6 +58,7 @@
 	let from = $derived(Math.min(start, Math.max(0, count - WINDOW)));
 	let to = $derived(Math.min(count, Math.max(end, from + WINDOW)));
 	let rows = $derived(Array.from({ length: to - from }, (_, k) => from + k));
+	let picked = $derived(cards.filter((n) => selected.has(n.id)).length);
 
 	let last_visible = 0;
 	/** When you last scrolled this lane yourself, by wheel or by the strip. */
@@ -121,11 +130,12 @@
 	}
 </script>
 
-<div class="lane" testId="lane-{key}" onscroll={on_wheel}>
+<div class="lane" testId="lane-{key}" onscroll={on_wheel} onmouseenter={onhover}>
 	<div class="head">
 		<div class="dot" style="background-color: var(--{tone})"></div>
 		<div class="title">{title}</div>
 		<div class="badge">{badge}</div>
+		{#if picked}<div class="picked">{picked} selected</div>{/if}
 		<div class="grow"></div>
 		<Tooltip content={sort === 'asc' ? 'Oldest first' : 'Newest first'} side="bottom">
 			{#snippet children(hover)}
@@ -153,7 +163,12 @@
 			{#each rows as i (i < cards.length ? cards[i].id : 'end')}
 				<div class="row">
 					{#if i < cards.length}
-						<Card n={cards[i]} onmenu={(x, y) => onmenu(cards[i], x, y)} />
+						<Card
+							n={cards[i]}
+							selected={selected.has(cards[i].id)}
+							onmenu={(x, y) => onmenu(cards[i], x, y)}
+							onselect={(how) => onselect(cards[i], how)}
+						/>
 					{:else}
 						<div class="end">{status}</div>
 					{/if}
@@ -215,6 +230,10 @@
 		background-color: var(--surface);
 	}
 	.sort.on {
+		color: var(--accent);
+	}
+	.picked {
+		font-size: 11px;
 		color: var(--accent);
 	}
 	.badge {

@@ -4,8 +4,25 @@
 	import { link, open_url, type Notification } from './gh.ts';
 	import { subject_icon } from './icons.ts';
 
-	/** `onmenu` opens the context menu at window coordinates (#2). */
-	let { n, onmenu }: { n: Notification; onmenu: (x: number, y: number) => void } = $props();
+	/** `onmenu` opens the context menu at window coordinates (#2); `onselect` reports ⌘- and ⇧-clicks (#3). */
+	let {
+		n,
+		selected,
+		onmenu,
+		onselect
+	}: {
+		n: Notification;
+		selected: boolean;
+		onmenu: (x: number, y: number) => void;
+		onselect: (how: 'toggle' | 'range') => void;
+	} = $props();
+
+	/** A plain click opens the card; ⌘ toggles it in the selection, ⇧ selects up to it. */
+	function click(e: GpuixEvent) {
+		if (e.modifiers?.cmd) onselect('toggle');
+		else if (e.modifiers?.shift) onselect('range');
+		else open();
+	}
 	let el: ShadowNode | null = null;
 
 	/** Shift+F10 opens the menu from the keyboard, near the card's top left. */
@@ -36,10 +53,11 @@
 <div
 	class="card"
 	class:read={!n.unread}
+	class:selected
 	testId="card-{n.id}"
 	hitbox="self"
 	tabindex={0}
-	onclick={open}
+	onclick={click}
 	onauxclick={(e: GpuixEvent) => e.isRightClick && onmenu(e.x ?? 0, e.y ?? 0)}
 	onkeydown={key}
 	{@attach (node: ShadowNode) => (el = node)}
@@ -50,6 +68,7 @@
 		{/if}
 		<div class="repo">{n.repository.full_name}</div>
 		<div class="when">{ago(n.updated_at)}</div>
+		{#if selected}<div class="tick">✓</div>{/if}
 	</div>
 	<div class="title">{n.subject.title}</div>
 	{#if n.labels?.length}
@@ -93,6 +112,21 @@
 	.card:focus-visible {
 		outline-width: 2px;
 		outline-color: var(--accent);
+	}
+	.card.selected {
+		border-color: var(--accent);
+		background-color: var(--raised);
+	}
+	.tick {
+		width: 16px;
+		height: 16px;
+		border-radius: 8px;
+		background-color: var(--accent);
+		color: var(--bg);
+		font-size: 10px;
+		font-weight: bold;
+		text-align: center;
+		line-height: 16px;
 	}
 	.card.read {
 		opacity: 0.55;
