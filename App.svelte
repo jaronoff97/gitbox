@@ -3,6 +3,7 @@
 	import Automations from './src/Automations.svelte';
 	import Board from './src/Board.svelte';
 	import Chat from './src/Chat.svelte';
+	import Jobs from './src/Jobs.svelte';
 	import { init as init_automations, watch } from './src/automations.svelte.ts';
 	import Onboarding from './src/Onboarding.svelte';
 	import { init, settings } from './src/settings.svelte.ts';
@@ -95,6 +96,7 @@
 				</div>
 			{/if}
 		</div>
+		<Jobs />
 	{:else}
 		<Onboarding ondone={() => set_onboarded(true)} />
 	{/if}

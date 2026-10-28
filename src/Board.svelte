@@ -16,6 +16,7 @@
 	import * as gh from './gh.ts';
 	import { notifications, PER_PAGE, viewer, type Action, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
+	import { track } from './jobs.svelte.ts';
 	import { LANE_TITLES, lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
 
 	/** Back to onboarding, for when gh stops working after setup (a logout, say). `active`: the
@@ -305,33 +306,42 @@
 		if (loading) return;
 		const mine = run;
 		loading = true;
-		try {
-			while (more && (stale || lanes.some((l) => l.sort === 'asc' || l.loaded < l.target))) {
-				const opts = { all: settings.include_read, participating: settings.participating };
-				const pages = await Promise.all(
-					Array.from({ length: settings.batch }, (_, k) => notifications(page + k + 1, opts))
-				);
-				if (mine !== run) return;
-				page += settings.batch;
-				if (stale) {
-					items = [];
-					stale = false;
-				}
-				for (const got of pages) {
-					items.push(...got);
-					// A short page is the last; any after it are empty.
-					if (got.length < PER_PAGE) {
-						more = false;
-						break;
+		// The progress popup (src/Jobs.svelte) shows the load while it runs.
+		await track(stale ? 'Refreshing inbox' : 'Loading notifications', async (job) => {
+			let fetched = 0;
+			try {
+				while (more && (stale || lanes.some((l) => l.sort === 'asc' || l.loaded < l.target))) {
+					const opts = { all: settings.include_read, participating: settings.participating };
+					const pages = await Promise.all(
+						Array.from({ length: settings.batch }, (_, k) => notifications(page + k + 1, opts))
+					);
+					if (mine !== run) return;
+					page += settings.batch;
+					if (stale) {
+						items = [];
+						stale = false;
+					}
+					for (const got of pages) {
+						items.push(...got);
+						fetched += got.length;
+						job.detail = `${fetched} notifications`;
+						// A short page is the last; any after it are empty.
+						if (got.length < PER_PAGE) {
+							more = false;
+							break;
+						}
 					}
 				}
+			} catch (e) {
+				if (mine === run) error = (e as Error).message;
+			} finally {
+				if (mine === run) loading = false;
 			}
-		} catch (e) {
-			if (mine === run) error = (e as Error).message;
-		} finally {
-			if (mine === run) loading = false;
-		}
+		});
 	}
+
+	/** The refresh button and ⌘R: not while a load runs, so a second press can't start it over. */
+	const refresh = () => !loading && start();
 
 	/** Bumped with every start-over, so each lane scrolls back to its top. */
 	let epoch = $state(0);
@@ -404,7 +414,7 @@
 	$effect(() =>
 		register([
 			{ id: 'app.settings', title: 'Settings…', group: 'app', keys: 'cmd-,', when: () => !show_settings, run: () => (show_settings = true) },
-			{ id: 'file.refresh', title: 'Refresh', group: 'file', keys: 'cmd-r', run: start },
+			{ id: 'file.refresh', title: 'Refresh', group: 'file', keys: 'cmd-r', when: () => !loading, run: refresh },
 			{
 				id: 'file.open-toast',
 				title: 'Open What the Last Action Touched',
@@ -532,9 +542,9 @@
 		</div>
 		<div class="grow"></div>
 		<FilterMenu {items} filters={settings.filters} onchange={filter} onopen={(open) => (filters_open = open)} />
-		<Tooltip content="Refresh (⌘R)" side="bottom">
+		<Tooltip content={loading ? 'Refreshing…' : 'Refresh (⌘R)'} side="bottom">
 			{#snippet children(hover)}
-				<div class="tool" class:busy={loading} {...hover} hitbox="self" testId="refresh" tabindex={0} onclick={start}>
+				<div class="tool" class:busy={loading} {...hover} hitbox="self" testId="refresh" tabindex={0} onclick={refresh}>
 					<svg class="icon" source={sync}></svg>
 				</div>
 			{/snippet}
@@ -679,6 +689,7 @@
 	}
 	.tool.busy {
 		color: var(--accent);
+		cursor: default;
 	}
 	.tool:focus-visible {
 		outline-width: 2px;

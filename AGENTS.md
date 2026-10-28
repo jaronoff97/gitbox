@@ -179,6 +179,12 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   (`mark_read`, `mark_done`, `unsubscribe`, `set_state`, `comment`, `copy`) are in `src/gh.ts`;
   a comment goes to `gh` through stdin.
 - `src/Toast.svelte` — short messages at the bottom of the window.
+- `src/jobs.svelte.ts`, `src/Jobs.svelte` — background work and its progress popup, in the
+  top-right corner under the toolbar on every tab. `track(title, work)` shows a job until `work`
+  settles; `work` sets its `detail`, and a `total` with `done` draws a bar. The popup takes no
+  clicks. The board's loads ("Refreshing inbox") and the automations (only when they have
+  something to do, as they check every minute) use it. Refresh, the button and ⌘R, does nothing
+  while a load runs.
 - `src/Card.svelte` — one notification; a click or Enter opens `link(n)` in the browser: the PR or
   issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
   the subject's API object names.

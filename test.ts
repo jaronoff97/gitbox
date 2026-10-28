@@ -45,6 +45,8 @@ else if (page) {
 	if (!process.env.FAKE_AUTHED) { console.error('HTTP 401: Bad credentials'); process.exit(1); }
 	// The first page is where every load starts, so the test can count loads.
 	if (page[1] === '1' && process.env.FAKE_LOG) require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd }) + '\\n');
+	// FAKE_SLOW_PAGES makes each page take 300 ms, so a test can see a refresh in progress.
+	if (process.env.FAKE_SLOW_PAGES) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
 	const from = (page[1] - 1) * 50 + 1;
 	const to = Math.min(from + 49, 290);
 	console.log(JSON.stringify(Array.from({ length: Math.max(to - from + 1, 0) }, (_, k) => note(from + k))));
@@ -776,6 +778,21 @@ press('enter');
 await wait_for(() => has('Todo'), { label: '↩ shows the board' });
 check('onboarding works from the keyboard', saved().onboarded === true);
 
+// Background jobs: a refresh shows its progress in the top-right corner, and Refresh (the button and
+// ⌘R) waits for it rather than starting it over.
+await wait_for(() => !find_test_id('job'), { label: 'no load in progress' });
+process.env.FAKE_SLOW_PAGES = '1';
+const loads_at_refresh = loads();
+click_test_id('refresh');
+await wait_for(() => has('Refreshing inbox'), { label: 'the refresh popup' });
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-job.png'));
+check('a refresh shows its progress in the corner', has('Starting…') && (bounds(find_test_id('job')!)?.x ?? 0) > 1100);
+click_test_id('refresh');
+press('cmd-r');
+await wait_for(() => !find_test_id('job'), { timeout: 8000, label: 'the refresh ends' });
+delete process.env.FAKE_SLOW_PAGES;
+check('Refresh waits for the load in progress', loads() === loads_at_refresh + 1);
+
 // The sidebar: Automations and Chat cover the board, which stays loaded behind them, keys and all.
 await wait_for(() => !!find_test_id('card-4'), { label: 'the board again' });
 click_test_id('nav-automations');
@@ -836,7 +853,10 @@ check('the list describes it', has('When reason is review requested and author i
 await check_automations();
 check('a new automation leaves older notifications alone', !calls().some((c) => c.cmd.startsWith('pr review')));
 put({ ...automations.list[0], created: '2000-01-01T00:00:00.000Z' });
-await check_automations();
+const automating = check_automations();
+await wait_for(() => has('Running automations'), { label: 'the automations job' });
+check('the automations show their progress', text().includes('of 12'));
+await automating;
 const approved = calls().filter((c) => c.cmd.startsWith('pr review'));
 check('it approves each matching PR', approved.length === 12 && called('pr review https://github.com/octo/repo/pull/4 --approve'));
 check('then marks it done', called('api -X DELETE notifications/threads/48'));
@@ -963,4 +983,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 125);
+finish('gitbox', 128);

@@ -5,6 +5,7 @@ import { untrack } from 'svelte';
 import { field, matches, type Filter } from './filters.ts';
 import * as gh from './gh.ts';
 import type { Notification } from './gh.ts';
+import { track } from './jobs.svelte.ts';
 import { automations_file, dir, load, save } from './store.ts';
 
 export type Step = 'approve' | 'read' | 'done' | 'unsubscribe';
@@ -72,11 +73,16 @@ export function describe(a: Automation) {
  * ponytail: once per thread, so new commits on an approved PR don't approve it again; key the log on
  * `updated_at` too if a re-run on new activity is ever wanted. */
 export async function apply(items: Notification[]) {
-	for (const a of automations.list) {
-		if (!a.enabled || !a.when.length || !a.then.length) continue;
-		for (const n of items) {
-			if (n.updated_at < a.created || !matches(n, a.when)) continue;
-			if (automations.log.some((r) => r.automation === a.id && r.thread === n.id)) continue;
+	const todo = automations.list
+		.filter((a) => a.enabled && a.when.length && a.then.length)
+		.flatMap((a) => items.filter((n) => n.updated_at >= a.created && matches(n, a.when)).map((n) => ({ a, n })))
+		.filter(({ a, n }) => !automations.log.some((r) => r.automation === a.id && r.thread === n.id));
+	// A check with nothing to do stays out of the progress popup, as it runs every minute.
+	if (!todo.length) return;
+	await track('Running automations', async (job) => {
+		job.total = todo.length;
+		for (const { a, n } of todo) {
+			job.detail = `${a.name || 'Untitled'}: ${n.subject.title}`;
 			const run: Run = { automation: a.id, thread: n.id, title: n.subject.title, url: gh.web_url(n.subject.url), at: new Date().toISOString() };
 			try {
 				for (const step of a.then) await STEPS.find((s) => s.key === step)!.run(n);
@@ -85,8 +91,9 @@ export async function apply(items: Notification[]) {
 			}
 			automations.log = [run, ...automations.log].slice(0, 200);
 			save({ automation_log: $state.snapshot(automations.log) });
+			job.done++;
 		}
-	}
+	});
 }
 
 let running: Promise<void> | null = null;
