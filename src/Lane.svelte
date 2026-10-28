@@ -2,6 +2,7 @@
 	import Portal from 'gpuix-svelte/components/Portal.svelte';
 	import Tooltip from 'gpuix-svelte/components/Tooltip.svelte';
 	import { get_native, type GpuixEvent, type ShadowNode } from 'gpuix-svelte';
+	import { untrack } from 'svelte';
 	import Card from './Card.svelte';
 	import type { Notification } from './gh.ts';
 	import { sort_asc, sort_desc } from './icons.ts';
@@ -21,6 +22,9 @@
 		selected,
 		onselect,
 		onhover,
+		focused_id,
+		onfocus,
+		reveal,
 		ongrow
 	}: {
 		key: string;
@@ -40,6 +44,11 @@
 		onselect: (n: Notification, how: 'toggle' | 'range') => void;
 		/** The pointer entered this lane: ⌘A selects the lane under it. */
 		onhover: () => void;
+		/** The card that has the board's keyboard focus (#5), if it is in this lane. */
+		focused_id: string | null;
+		onfocus: (n: Notification) => void;
+		/** Changes when a key moved the focus here: scroll the focused card into view. */
+		reveal: number;
 		/** Called when you scroll to the end: the board shows more cards here if it has them. */
 		ongrow: () => void;
 	} = $props();
@@ -60,6 +69,7 @@
 	let rows = $derived(Array.from({ length: to - from }, (_, k) => from + k));
 	let picked = $derived(cards.filter((n) => selected.has(n.id)).length);
 
+	let first_visible = 0;
 	let last_visible = 0;
 	/** When you last scrolled this lane yourself, by wheel or by the strip. */
 	let touched_at = 0;
@@ -80,6 +90,7 @@
 
 	function on_range(e: GpuixEvent) {
 		const first = e.startIndex ?? 0;
+		first_visible = first;
 		last_visible = e.endIndex ?? 0;
 		if ((first < from + 5 && from > 0) || (last_visible > to - 5 && to < count)) {
 			start = Math.max(0, first - OVERSCAN);
@@ -89,6 +100,26 @@
 		// that is merely short stays as it is.
 		if (at_end() && Date.now() - touched_at < 1000) ongrow();
 	}
+
+	/** Scrolls `row` into view if it isn't (the last visible row can be cut off, so it counts as out).
+	 * Like a jump of the strip, it moves the window first: GPUI reports no range after scrollToItem. */
+	function bring_into_view(row: number) {
+		const native = get_native();
+		if (!native || list?.nativeId == null || (row >= first_visible && row < last_visible - 1)) return;
+		const span = Math.max(2, last_visible - first_visible);
+		const top = row < first_visible ? row : Math.max(0, row - span + 2);
+		start = Math.max(0, top - OVERSCAN);
+		end = Math.min(count, top + WINDOW);
+		first_visible = top;
+		last_visible = top + span;
+		native.scrollToItem(list.nativeId, top, 0);
+	}
+
+	let focus_index = $derived(focused_id ? cards.findIndex((c) => c.id === focused_id) : -1);
+	$effect(() => {
+		if (!reveal) return;
+		untrack(() => focus_index >= 0 && bring_into_view(focus_index));
+	});
 
 	// `scroll` is wheel input (negative is down). A short lane has no range change to report, so the
 	// wheel itself asks for more once the end is in view.
@@ -133,7 +164,7 @@
 <div class="lane" testId="lane-{key}" onscroll={on_wheel} onmouseenter={onhover}>
 	<div class="head">
 		<div class="dot" style="background-color: var(--{tone})"></div>
-		<div class="title">{title}</div>
+		<div class="title" class:active={focused_id !== null}>{title}</div>
 		<div class="badge">{badge}</div>
 		{#if picked}<div class="picked">{picked} selected</div>{/if}
 		<div class="grow"></div>
@@ -166,6 +197,9 @@
 						<Card
 							n={cards[i]}
 							selected={selected.has(cards[i].id)}
+							focused={cards[i].id === focused_id}
+							onpoint={() => onfocus(cards[i])}
+							{onhover}
 							onmenu={(x, y) => onmenu(cards[i], x, y)}
 							onselect={(how) => onselect(cards[i], how)}
 						/>
@@ -197,6 +231,9 @@
 		border-radius: 12px 12px 0px 0px;
 		background-color: var(--lane);
 	}
+	.title.active {
+		color: var(--accent);
+	}
 	.head {
 		user-select: none;
 		display: flex;
@@ -210,7 +247,7 @@
 		border-radius: 4px;
 	}
 	.title {
-		font-size: 13px;
+		font-size: var(--text-title, 13px);
 		font-weight: semibold;
 		color: var(--ink);
 	}
@@ -233,13 +270,13 @@
 		color: var(--accent);
 	}
 	.picked {
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--accent);
 	}
 	.badge {
 		padding: 0px 7px;
 		border-radius: 9px;
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 		background-color: var(--surface);
 	}
@@ -261,7 +298,7 @@
 	}
 	.row {
 		width: 100%;
-		padding: 0px 12px 8px 0px;
+		padding: 0px 12px var(--row-gap, 8px) 0px;
 	}
 	.gutter {
 		position: absolute;
@@ -282,7 +319,7 @@
 	}
 	.end {
 		padding: 10px 0px 14px 0px;
-		font-size: 12px;
+		font-size: var(--text-sm, 12px);
 		text-align: center;
 		color: var(--muted);
 	}

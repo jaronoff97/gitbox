@@ -100,6 +100,30 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   from Finder gets launchd's minimal one.
 - `src/store.ts` — state kept between runs (`onboarded`, `settings`), as JSON in
   `$XDG_CONFIG_HOME/gitbox` (default `~/.config/gitbox/state.json`).
+- `src/commands.svelte.ts` — every command in one registry (#4): id, title, menu group, keys,
+  `when`, `checked`, `run`. Components `register()` theirs in an `$effect`; `listen()`, called once
+  in `App.svelte`, is the only app-wide key handler (dialogs keep their own Escape/Enter). A single
+  key, or a command with `skip_editing`, doesn't run while a text field has focus. `caps()` draws
+  keys; `src/Shortcuts.svelte` (⌘/) lists them.
+- Keyboard (#5): the board's focus is state, `{ lane, id, index }`, as most cards aren't mounted.
+  j/k/h/l (or arrows) move it, ↩ opens, r/e/u/c act, Shift+F10 opens the menu (`card_nodes.ts`
+  finds where the card is drawn). A key move bumps `reveal`, and the lane scrolls the card into
+  view; a click does not. `src/listnav.svelte.ts` gives the filter menu and the card menu ↑↓↩.
+  An `<input>` takes Enter as `onsubmit` and ⌫/← as its own editing keys (no key event), so the
+  filter menu's back key is ⌘[. The settings dialog keeps Tab inside it and focuses its first
+  control a tick after it mounts, when the controls exist natively.
+- `src/Palette.svelte` — ⌘K (#6): one search over the registry's commands (that apply now), "Filter:"
+  entries from `options()`, "Go to" lanes, and "Open:" notifications (⌘↩ focuses the card).
+  `>`, `#`, `@` narrow it to commands, filters, authors. `src/fuzzy.ts` scores the match; the last
+  5 commands run (`recent` in state.json) lead the empty palette.
+- `src/menubar.ts`, `native/menu.m` — the native macOS menu bar (#7), from the registry. gpuix-svelte
+  has no menu API, so `menu.m` (AppKit) loads over `bun:ffi`: compiled by clang into
+  `dist/dev/libgitbox_menu.dylib` in development, into `Gitbox.app/Contents/Frameworks` by
+  `build.ts`. A click queues the command id; JS polls it every 50 ms. ⌘ keys are key equivalents
+  (the registry then leaves them to the menu); single keys, ⌘A, ⌘↩ and the Edit items are hints
+  only, so text fields keep them. Same-shaped menus update in place, as AppKit adds its own Edit
+  items to each new menu. Node has no FFI: `npm start` keeps GPUI's menu. The headless test sets
+  `GITBOX_NO_MENU`; `GITBOX_MENU_DEBUG=1` logs the menu bar, `=perform:<id>` also clicks an item.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.
@@ -134,7 +158,13 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 - `src/Card.svelte` — one notification; a click or Enter opens `link(n)` in the browser: the PR or
   issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
   the subject's API object names.
-- `src/Settings.svelte` — the settings dialog (⌘, opens it; ⌘R refreshes the board).
+- `src/Settings.svelte` — the settings dialog in tabs (#8): General, Board (cards per lane; lanes
+  shown, ordered and sorted), Appearance, Shortcuts (`ShortcutList.svelte`, as ⌘/ shows) and Advanced
+  (pages at once, `gh_host` → GH_HOST, `gh_path`, setup, reset). It opens on the last tab; ⌘[ ⌘]
+  change tabs.
+- `src/theme.ts` — the palettes (Catppuccin Mocha dark, Latte light) and the board's text size and
+  density, as CSS variables App sets. GPUI's rem is fixed, so text size scales the board's own
+  sizes. "System" reads `defaults read -g AppleInterfaceStyle` every 30 s.
 - `src/icons.ts` — Octicons as raw markup for `<svg source>`, which a compiled binary needs.
 - `assets/icon.svg`, `assets/icon.png` — the app icon and its 1024 px render (see `build.ts`).
 - `test.ts` — the headless test (`gpuix-svelte/test`); a plain script that exits 1 on failure. It

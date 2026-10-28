@@ -1,38 +1,40 @@
 <script lang="ts">
-	import { get_native, type GpuixEvent, type ShadowNode } from 'gpuix-svelte';
+	import type { GpuixEvent, ShadowNode } from 'gpuix-svelte';
 	import { words } from './filters.ts';
 	import { link, open_url, type Notification } from './gh.ts';
+	import { card_nodes } from './card_nodes.ts';
 	import { subject_icon } from './icons.ts';
 
 	/** `onmenu` opens the context menu at window coordinates (#2); `onselect` reports ⌘- and ⇧-clicks (#3). */
 	let {
 		n,
 		selected,
+		focused,
 		onmenu,
-		onselect
+		onselect,
+		onpoint,
+		onhover
 	}: {
 		n: Notification;
 		selected: boolean;
+		/** The board's keyboard focus (#5) is on this card. */
+		focused: boolean;
 		onmenu: (x: number, y: number) => void;
 		onselect: (how: 'toggle' | 'range') => void;
+		/** Any click: the keyboard focus moves here. */
+		onpoint: () => void;
+		/** The pointer came onto this card: the card, not its lane, gets the hover, as it paints over it. */
+		onhover: () => void;
 	} = $props();
 
 	/** A plain click opens the card; ⌘ toggles it in the selection, ⇧ selects up to it. */
 	function click(e: GpuixEvent) {
+		onpoint();
 		if (e.modifiers?.cmd) onselect('toggle');
 		else if (e.modifiers?.shift) onselect('range');
 		else open();
 	}
-	let el: ShadowNode | null = null;
 
-	/** Shift+F10 opens the menu from the keyboard, near the card's top left. */
-	function key(e: GpuixEvent) {
-		if (e.key === 'enter') open();
-		else if (e.key === 'f10' && e.modifiers?.shift) {
-			const b = el?.nativeId == null ? null : get_native()?.getElementBounds(el.nativeId);
-			if (b) onmenu(b.x + 24, b.y + 24);
-		}
-	}
 
 	let subject = $derived(subject_icon(n));
 
@@ -54,13 +56,18 @@
 	class="card"
 	class:read={!n.unread}
 	class:selected
+	class:focused
 	testId="card-{n.id}"
 	hitbox="self"
 	tabindex={0}
 	onclick={click}
-	onauxclick={(e: GpuixEvent) => e.isRightClick && onmenu(e.x ?? 0, e.y ?? 0)}
-	onkeydown={key}
-	{@attach (node: ShadowNode) => (el = node)}
+	onauxclick={(e: GpuixEvent) => e.isRightClick && (onpoint(), onmenu(e.x ?? 0, e.y ?? 0))}
+	onfocus={onpoint}
+	onmouseenter={onhover}
+	{@attach (node: ShadowNode) => {
+		card_nodes.set(n.id, node);
+		return () => card_nodes.get(n.id) === node && card_nodes.delete(n.id);
+	}}
 >
 	<div class="top">
 		{#if n.repository.owner?.avatar_url}
@@ -96,9 +103,9 @@
 	.card {
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: var(--card-gap, 8px);
 		width: 100%;
-		padding: 12px;
+		padding: var(--card-pad, 12px);
 		border-radius: 10px;
 		border-width: 1px;
 		border-color: var(--border);
@@ -110,6 +117,10 @@
 		background-color: var(--raised);
 	}
 	.card:focus-visible {
+		outline-width: 2px;
+		outline-color: var(--accent);
+	}
+	.card.focused {
 		outline-width: 2px;
 		outline-color: var(--accent);
 	}
@@ -135,7 +146,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		font-size: 12px;
+		font-size: var(--text-sm, 12px);
 		color: var(--muted);
 	}
 	.avatar {
@@ -151,11 +162,11 @@
 		overflow: hidden;
 	}
 	.when {
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 	}
 	.title {
-		font-size: 13px;
-		line-height: 18px;
+		font-size: var(--text-md, 13px);
+		line-height: var(--line-md, 18px);
 		color: var(--ink);
 		line-clamp: 3;
 	}
@@ -163,7 +174,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 	}
 	.icon {
@@ -193,7 +204,7 @@
 		border-radius: 9px;
 		border-width: 1px;
 		border-color: var(--border);
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 	}
 	.label-name {
@@ -208,7 +219,7 @@
 		border-radius: 3px;
 	}
 	.more {
-		font-size: 11px;
+		font-size: var(--text-xs, 11px);
 		color: var(--muted);
 	}
 	.reason {

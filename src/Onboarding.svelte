@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { register } from './commands.svelte.ts';
 	import { checks } from './gh.ts';
 
 	let { ondone }: { ondone: () => void } = $props();
@@ -23,6 +24,20 @@
 	}
 
 	run();
+
+	// ↩ is the button the card shows: Show notifications, or Check again (#5).
+	$effect(() =>
+		register([
+			{
+				id: 'onboarding.continue',
+				title: 'Continue',
+				group: 'go',
+				keys: 'enter',
+				when: () => !busy,
+				run: () => (ready ? ondone() : run())
+			}
+		])
+	);
 
 	const icon = { wait: '○', run: '…', ok: '✓', fail: '✕' };
 </script>

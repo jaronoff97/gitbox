@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
+import { score } from './src/fuzzy.ts';
+import { menu_json } from './src/menubar.ts';
+import { palette as colors } from './src/theme.ts';
 import { link, type Notification } from './src/gh.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
@@ -39,6 +42,8 @@ else if (cmd === 'api user --jq {login, avatar_url}') {
 } else if (cmd === 'api notifications?per_page=1') console.log('[]');
 else if (page) {
 	if (!process.env.FAKE_AUTHED) { console.error('HTTP 401: Bad credentials'); process.exit(1); }
+	// The first page is where every load starts, so the test can count loads.
+	if (page[1] === '1' && process.env.FAKE_LOG) require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd }) + '\\n');
 	const from = (page[1] - 1) * 50 + 1;
 	const to = Math.min(from + 49, 290);
 	console.log(JSON.stringify(Array.from({ length: Math.max(to - from + 1, 0) }, (_, k) => note(from + k))));
@@ -86,7 +91,10 @@ process.env.FAKE_LOG = join(bin, 'calls.log');
 const calls = (): { cmd: string; stdin?: string }[] =>
 	existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
 const called = (cmd: string) => calls().some((c) => c.cmd === cmd);
+const settings_filters = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8')).settings.filters.length;
 process.env.PATH = `${bin}:${process.env.PATH}`;
+// No native menu bar in a headless run; menu_json() is checked below instead.
+process.env.GITBOX_NO_MENU = '1';
 // The saved state goes to a temp dir, not the real ~/.config/gitbox.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'gitbox-config-'));
 const saved = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8'));
@@ -413,22 +421,303 @@ check('Open past 10 tabs asks first, and Cancel opens nothing', opened() === bef
 press('escape');
 await wait_for(() => picked().length === 0, { label: 'Escape clears it all' });
 
+// Commands (#4): every shortcut runs a command from the registry.
+const loads = () => calls().filter((c) => c.cmd === 'api notifications?per_page=50&page=1').length;
+const loads_before = loads();
+press('cmd-r');
+await wait_for(() => loads() > loads_before, { label: '⌘R' });
+check('⌘R refreshes, through the registry', loads() === loads_before + 1);
+await wait_for(() => !text().includes('loading…'), { label: 'the refresh settles' });
+press('cmd-2');
+await wait_for(() => !has('Requested'), { label: '⌘2 hides Requested' });
+check('⌘2 hides the second lane, and only it', !has('Requested') && has('Todo') && has('Waiting on me'));
+press('cmd-2');
+await wait_for(() => has('Requested'), { label: '⌘2 shows it again' });
+press('cmd-/');
+await wait_for(() => has('Keyboard Shortcuts'), { label: '⌘/' });
+check(
+	'⌘/ lists the shortcuts, with their keys',
+	['Refresh', 'Settings…', 'Select All Cards', 'Show Requested', 'Clear Selection'].every(has) && has('⌘') && has('R')
+);
+press('escape');
+await wait_for(() => !has('Keyboard Shortcuts'), { label: 'Escape closes the shortcuts' });
+// ⌘A in a text field selects the text, not cards.
+click_test_id('add-filter');
+await wait_for(() => has('Repository'), { label: 'the filter menu, for its search' });
+click_test_id('field-repo');
+await wait_for(() => find_test_id('filter-search') !== null, { label: 'the search box' });
+click_test_id('filter-search');
+press('cmd-a');
+await wait(100);
+check('⌘A in a text field selects no cards', !all_text().some((t) => / selected$/.test(t)));
+press('escape');
+await wait(100);
+
+// Keyboard navigation (#5): the board's focus is a card; keys move it and act on it.
+const times = (cmd: string) => calls().filter((c) => c.cmd === cmd).length;
+const open_count = (id: number) => times(`open https://github.com/octo/repo/pull/${id}`);
+const last_open = () => calls().filter((c) => c.cmd.startsWith('open ')).at(-1)?.cmd ?? '';
+press('escape');
+press('escape');
+hover(find_test_id('lane-todo')!);
+press('j');
+press('j');
+press('enter');
+await wait_for(() => open_count(6) === 1, { label: 'j j ↩' });
+check('the first j focuses the lane under the pointer, j moves down, ↩ opens', last_open().endsWith('/pull/6'));
+const fours = open_count(4);
+press('l');
+press('k');
+press('enter');
+await wait_for(() => open_count(4) > fours, { label: 'l k ↩' });
+check('l moves to the next lane at the same row, k moves up', last_open().endsWith('/pull/4'));
+
+// Keys typed into a text field don't move the board.
+click_test_id('add-filter');
+await wait_for(() => has('Repository'), { label: 'the filter menu' });
+click_test_id('field-repo');
+await wait_for(() => find_test_id('filter-search') !== null, { label: 'the search' });
+type('j j');
+press('escape');
+await wait(100);
+press('enter');
+await wait_for(() => open_count(4) > fours + 1, { label: '↩ after typing in the search' });
+check('j typed in the search leaves the focus where it was', last_open().endsWith('/pull/4'));
+
+// The filter menu by keyboard: ↓ ↩ opens the second field, ↩ toggles its first value, ⌘[ goes back.
+click_test_id('add-filter');
+await wait_for(() => has('Repository'), { label: 'the filter menu again' });
+press('down');
+press('enter');
+await wait_for(() => has('pull request'), { label: 'the Type values' });
+press('enter');
+await wait_for(() => find_test_id('chip-type-pull request') !== null, { label: 'a chip from the keyboard' });
+press('cmd-[');
+await wait_for(() => has('Repository'), { label: '⌘[ goes back to the fields' });
+check('the filter menu works from the keyboard', find_test_id('chip-type-pull request') !== null);
+press('escape');
+await wait(100);
+click_test_id('chip-type-pull request');
+press('backspace');
+await wait_for(() => !find_test_id('chip-type-pull request'), { label: '⌫ on a chip' });
+check('⌫ on a focused chip removes it', settings_filters() === 0);
+
+// Card keys: e marks the focused card done and the focus moves to the card in its place.
+press('k');
+const done_4 = times('api -X DELETE notifications/threads/4');
+press('e');
+await wait_for(() => times('api -X DELETE notifications/threads/4') > done_4, { label: 'e' });
+const eights = open_count(8);
+press('enter');
+await wait_for(() => open_count(8) > eights, { label: '↩ after e' });
+check('e marks the focused card done, and the next card takes the focus', last_open().endsWith('/pull/8'));
+
+// Shift+F10 opens the menu at the focused card; ↩ runs its first item.
+press('shift-f10');
+await wait_for(() => has('Mark as Done'), { label: 'Shift+F10' });
+press('enter');
+await wait_for(() => open_count(8) > eights + 1, { label: '↩ in the menu' });
+check('Shift+F10 opens the card menu, and ↩ runs its first item', !has('Mark as Done'));
+press('c');
+await wait_for(() => has('Comment on octo/repo #8'), { label: 'c' });
+check('c opens the comment dialog for the focused card', has('Comment on octo/repo #8'));
+press('escape');
+await wait(100);
+
+// ⌘↓: the end of the lane, which asks for more as a scroll to the end does.
+press('cmd-down');
+press('enter');
+await wait_for(() => !last_open().endsWith('/pull/8'), { label: '⌘↓ ↩' });
+check('⌘↓ goes to the end of the lane', Number(last_open().split('/').pop()) > 150);
+press('escape');
+
+// The ⌘K palette (#6): commands from the registry, filters, lanes and notifications.
+check(
+	'the fuzzy match: in order, word starts and runs first',
+	score('xyz', 'Refresh') === null &&
+		score('sc', 'Show Commands')! > score('sc', 'Disconnect')! &&
+		score('ref', 'Refresh')! > score('ref', 'Rename Filter')!
+);
+const palette = async (keys: string) => {
+	press('cmd-k');
+	await wait_for(() => find_test_id('palette') !== null, { label: '⌘K' });
+	await wait(50);
+	if (keys) type(keys);
+	await wait(50);
+};
+const loads_6 = loads();
+await palette('r e f r');
+await wait_for(() => has('Refresh'), { label: 'Refresh in the palette' });
+press('enter');
+await wait_for(() => loads() > loads_6, { label: '⌘K refr ↩' });
+check('a command runs from the palette as its shortcut does', !find_test_id('palette'));
+await wait_for(() => !text().includes('loading…'), { label: 'the refresh settles' });
+
+await palette('o t h e r');
+await wait_for(() => has('Filter: Repository octo/other'), { label: 'a filter in the palette' });
+press('enter');
+await wait_for(() => find_test_id('chip-repo-octo/other') !== null, { label: 'the filter from the palette' });
+check('a "Filter:" entry adds the filter', find_test_id('chip-repo-octo/other') !== null);
+press('alt-cmd-f');
+await wait_for(() => !find_test_id('chip-repo-octo/other'), { label: '⌥⌘F clears the filters' });
+
+const twelves = open_count(12);
+await palette('n o t e space 1 2');
+await wait_for(() => has('Open: Note 12'), { label: 'a notification in the palette' });
+press('enter');
+await wait_for(() => open_count(12) > twelves, { label: 'open from the palette' });
+check('an "Open:" entry opens the notification', last_open().endsWith('/pull/12'));
+
+const loads_6b = loads();
+await palette('');
+press('enter');
+await wait_for(() => loads() > loads_6b, { label: 'the recent command first' });
+check('the empty palette starts with the last command run', !find_test_id('palette'));
+await wait_for(() => !text().includes('loading…'), { label: 'that refresh settles' });
+
+click_test_id('add-filter');
+await wait_for(() => has('Repository'), { label: 'the filter menu' });
+click_test_id('field-repo');
+await wait_for(() => find_test_id('filter-search') !== null, { label: 'its search' });
+press('cmd-k');
+await wait_for(() => find_test_id('palette') !== null, { label: '⌘K from a text field' });
+check('⌘K opens the palette while a text field has the focus', find_test_id('palette') !== null);
+press('escape');
+await wait(100);
+press('escape');
+await wait(100);
+
+// The palette owns the arrow keys: ↓ moves its list, not the board's focus.
+const opens_6 = calls().filter((c) => c.cmd.startsWith('open ')).length;
+press('escape');
+hover(find_test_id('lane-todo')!);
+await palette('');
+press('down');
+press('down');
+press('escape');
+await wait(100);
+press('enter');
+await wait(150);
+check('arrows in the palette leave the board alone', calls().filter((c) => c.cmd.startsWith('open ')).length === opens_6);
+
+// The menu bar (#7) comes from the registry: menus in the macOS order, ⌘ keys as key equivalents,
+// single keys and the ones a text field needs (⌘A, ⌘↩) as hints only, toggles with their check.
+{
+	const menus = menu_json();
+	const find = (menu: string, title: string) => menus.find((m) => m.title === menu)?.items.find((i) => i.title === title);
+	check(
+		'the menu bar has the Mac menus in order',
+		menus.map((m) => m.title).join(',') === 'Gitbox,File,Edit,View,Go,Notification,Window,Help'
+	);
+	check(
+		'⌘ shortcuts are key equivalents; single keys and ⌘A are hints',
+		find('File', 'Refresh')?.keys === 'cmd-r' &&
+			find('Go', 'Next Card')?.hint === 'J' &&
+			!find('Go', 'Next Card')?.keys &&
+			find('Edit', 'Select All Cards')?.hint === '⌘A' &&
+			!find('Edit', 'Select All Cards')?.keys
+	);
+	check(
+		'toggles carry their state, and the standard items their roles',
+		find('View', 'Show Todo')?.checked === true &&
+			find('Gitbox', 'Quit Gitbox')?.role === 'quit' &&
+			find('Edit', 'Copy')?.role === 'copy' &&
+			!find('Edit', 'Copy')?.keys
+	);
+}
+
+const dialog_open = () => find_test_id('settings-dialog') !== null;
 click_test_id('settings');
-await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
+await wait_for(dialog_open, { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
 const behind = () => bounds(find_test_id('card-289')!)?.y;
 const before = behind();
 wheel({ x: 800, y: 400 }, 0, -300);
 await wait(300);
 check('a scroll over the settings leaves the board behind still', before !== undefined && behind() === before);
-click_test_id('toggle-hide_done');
-await wait_for(() => !has('Merged / Closed'), { label: 'the done lane hides' });
+
+// Settings in tabs (#8). Board: lanes on and off, their order and sort; cards per lane.
+click_test_id('tab-board');
+await wait_for(() => has('Cards per lane'), { label: 'the Board tab' });
+click_test_id('lane-shown-done');
+await wait_for(() => !find_test_id('lane-done'), { label: 'the done lane hides' });
 click_test_id('lane_size-25');
 await wait_for(() => all_text().filter((t) => t === '25+').length === 3, { label: 'lanes of 25' });
-check('settings change the board at once', !has('Merged / Closed') && badges('25+') === 3);
-check('settings are saved', saved().settings.hide_done === true && saved().settings.lane_size === 25);
+check('settings change the board at once', !find_test_id('lane-done') && badges('25+') === 3);
+check('settings are saved', saved().settings.lanes.find((l: { key: string }) => l.key === 'done').shown === false && saved().settings.lane_size === 25);
+const x = (key: string) => bounds(find_test_id(`lane-${key}`)!)!.x;
+click_test_id('lane-up-waiting');
+await wait_for(() => x('waiting') < x('requested'), { label: 'Waiting on me moves left' });
+check(
+	'↑ moves a lane earlier on the board, and the order is saved',
+	saved().settings.lanes.map((l: { key: string }) => l.key).join(',') === 'todo,waiting,requested,done'
+);
+click_test_id('lane-down-waiting');
+await wait_for(() => x('waiting') > x('requested'), { label: 'and back' });
+
+// Appearance: density and text size change a card's size; the theme is saved, and its palettes differ.
+click_test_id('tab-appearance');
+await wait_for(() => has('Theme'), { label: 'the Appearance tab' });
+const card_h = () => bounds(find_test_id('card-2')!)!.height;
+const h0 = card_h();
+click_test_id('density-compact');
+await wait_for(() => card_h() < h0, { label: 'compact cards' });
+click_test_id('density-comfortable');
+await wait_for(() => card_h() === h0, { label: 'comfortable again' });
+click_test_id('text_size-1.3');
+await wait_for(() => card_h() > h0, { label: 'larger text' });
+check('density and text size change the cards', card_h() > h0 && saved().settings.text_size === 1.3);
+click_test_id('text_size-1');
+click_test_id('theme-light');
+await wait(100);
+check('the theme is saved, and light and dark differ', saved().settings.theme === 'light' && colors(false).bg !== colors(true).bg);
+click_test_id('theme-dark');
+
+// Shortcuts: the registry's list, and single keys off.
+click_test_id('tab-shortcuts');
+await wait_for(() => has('Single-key shortcuts'), { label: 'the Shortcuts tab' });
+check('the Shortcuts tab lists the commands', ['Next Card', 'Refresh', 'Command Palette…'].every(has));
+click_test_id('toggle-single_keys');
 press('escape');
-await wait_for(() => !has('Cards per lane'), { label: 'Escape closes settings' });
+await wait_for(() => !dialog_open(), { label: 'Escape closes settings' });
+const opens_8 = calls().filter((c) => c.cmd.startsWith('open ')).length;
+hover(find_test_id('lane-todo')!);
+press('escape');
+press('j');
+press('enter');
+await wait(150);
+check('with single keys off, j does nothing', calls().filter((c) => c.cmd.startsWith('open ')).length === opens_8);
+
+// The dialog opens on the last tab; ⌘] goes to the next.
+press('cmd-,');
+await wait_for(() => has('Single-key shortcuts'), { label: '⌘, opens on the last tab' });
+click_test_id('toggle-single_keys');
+press('cmd-]');
+await wait_for(() => has('Pages fetched at once'), { label: '⌘] goes to Advanced' });
+check('the dialog remembers its tab, and ⌘] moves on', saved().settings.single_keys === true);
+
+// The dialog by keyboard: its first control (a tab) has the focus; ← and → change tabs, and on a
+// choice they change the option.
+press('escape');
+await wait_for(() => !dialog_open(), { label: 'closed' });
+press('cmd-,');
+await wait_for(dialog_open, { label: '⌘, opens settings' });
+// The dialog takes the focus a tick after it mounts, when its controls exist natively.
+await wait(100);
+press('left');
+await wait_for(() => has('Single-key shortcuts'), { label: '← on the tabs' });
+check('← and → on the tabs change the tab', has('Single-key shortcuts'));
+click_test_id('tab-board');
+await wait_for(() => has('Cards per lane'), { label: 'the Board tab again' });
+click_test_id('lane_size-25');
+press('right');
+await wait(100);
+check('→ on a choice picks the next option', saved().settings.lane_size === 50);
+press('left');
+await wait(100);
+check('← picks the one before', saved().settings.lane_size === 25);
+press('escape');
+await wait_for(() => !dialog_open(), { label: 'Escape closes settings again' });
 
 await app.unmount();
 app = mount_headless(App, { width: 1280, height: 800 });
@@ -437,10 +726,12 @@ check('a restart skips onboarding', !text().includes('Welcome to gitbox'));
 // With lanes of 25, the start alone loads one batch; oldest first has to load the last page too.
 await wait_for(() => has('Note 289'), { label: 'oldest first after a restart' });
 check('a saved oldest first loads its whole lane after a restart', !has('Note 1'));
-check('settings survive a restart', !has('Merged / Closed'));
+check('settings survive a restart', !find_test_id('lane-done'));
 
 click_test_id('settings');
-await wait_for(() => has('Cards per lane'), { label: 'the settings dialog again' });
+await wait_for(dialog_open, { label: 'the settings dialog again' });
+click_test_id('tab-advanced');
+await wait_for(() => find_test_id('settings-reset') !== null, { label: 'the Advanced tab' });
 click_test_id('settings-reset');
 press('escape');
 await wait_for(() => has('Note 1'), { label: 'newest first again' });
@@ -452,6 +743,14 @@ await wait_for(() => text().includes('Bad credentials'), { label: 'a broken gh' 
 click_test_id('setup');
 await wait_for(() => text().includes('gh auth login'), { label: 'onboarding again' });
 check('run setup again clears the saved state', saved().onboarded === false);
+
+// Onboarding by keyboard (#5): ↩ checks again, then ↩ shows the notifications.
+process.env.FAKE_AUTHED = '1';
+press('enter');
+await wait_for(() => has('Show notifications'), { label: '↩ checks again' });
+press('enter');
+await wait_for(() => has('Todo'), { label: '↩ shows the board' });
+check('onboarding works from the keyboard', saved().onboarded === true);
 
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
@@ -474,4 +773,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 66);
+finish('gitbox', 99);
