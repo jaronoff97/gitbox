@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, bounds } from 'gpuix-svelte/test';
 import App from './App.svelte';
 import { matches } from './src/filters.ts';
+import { score } from './src/fuzzy.ts';
 import { link, type Notification } from './src/gh.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
@@ -526,6 +527,62 @@ await wait_for(() => !last_open().endsWith('/pull/8'), { label: '⌘↓ ↩' });
 check('⌘↓ goes to the end of the lane', Number(last_open().split('/').pop()) > 150);
 press('escape');
 
+// The ⌘K palette (#6): commands from the registry, filters, lanes and notifications.
+check(
+	'the fuzzy match: in order, word starts and runs first',
+	score('xyz', 'Refresh') === null &&
+		score('sc', 'Show Commands')! > score('sc', 'Disconnect')! &&
+		score('ref', 'Refresh')! > score('ref', 'Rename Filter')!
+);
+const palette = async (keys: string) => {
+	press('cmd-k');
+	await wait_for(() => find_test_id('palette') !== null, { label: '⌘K' });
+	await wait(50);
+	if (keys) type(keys);
+	await wait(50);
+};
+const loads_6 = loads();
+await palette('r e f r');
+await wait_for(() => has('Refresh'), { label: 'Refresh in the palette' });
+press('enter');
+await wait_for(() => loads() > loads_6, { label: '⌘K refr ↩' });
+check('a command runs from the palette as its shortcut does', !find_test_id('palette'));
+await wait_for(() => !text().includes('loading…'), { label: 'the refresh settles' });
+
+await palette('o t h e r');
+await wait_for(() => has('Filter: Repository octo/other'), { label: 'a filter in the palette' });
+press('enter');
+await wait_for(() => find_test_id('chip-repo-octo/other') !== null, { label: 'the filter from the palette' });
+check('a "Filter:" entry adds the filter', find_test_id('chip-repo-octo/other') !== null);
+press('alt-cmd-f');
+await wait_for(() => !find_test_id('chip-repo-octo/other'), { label: '⌥⌘F clears the filters' });
+
+const twelves = open_count(12);
+await palette('n o t e space 1 2');
+await wait_for(() => has('Open: Note 12'), { label: 'a notification in the palette' });
+press('enter');
+await wait_for(() => open_count(12) > twelves, { label: 'open from the palette' });
+check('an "Open:" entry opens the notification', last_open().endsWith('/pull/12'));
+
+const loads_6b = loads();
+await palette('');
+press('enter');
+await wait_for(() => loads() > loads_6b, { label: 'the recent command first' });
+check('the empty palette starts with the last command run', !find_test_id('palette'));
+await wait_for(() => !text().includes('loading…'), { label: 'that refresh settles' });
+
+click_test_id('add-filter');
+await wait_for(() => has('Repository'), { label: 'the filter menu' });
+click_test_id('field-repo');
+await wait_for(() => find_test_id('filter-search') !== null, { label: 'its search' });
+press('cmd-k');
+await wait_for(() => find_test_id('palette') !== null, { label: '⌘K from a text field' });
+check('⌘K opens the palette while a text field has the focus', find_test_id('palette') !== null);
+press('escape');
+await wait(100);
+press('escape');
+await wait(100);
+
 click_test_id('settings');
 await wait_for(() => has('Cards per lane'), { label: 'the settings dialog' });
 // The dialog covers the Waiting on me lane here; a wheel over it must not scroll the lane behind.
@@ -609,4 +666,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 82);
+finish('gitbox', 88);

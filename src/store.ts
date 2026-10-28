@@ -4,7 +4,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Settings } from './settings.svelte.ts';
 
-export type Saved = { onboarded?: boolean; settings?: Partial<Settings> };
+export type Saved = {
+	onboarded?: boolean;
+	settings?: Partial<Settings>;
+	/** The ⌘K palette's last commands, newest first. */
+	recent?: string[];
+};
 
 // Resolved per call, so a test can point XDG_CONFIG_HOME elsewhere after the imports.
 const dir = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'gitbox');

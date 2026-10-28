@@ -9,6 +9,7 @@
 	import { matches, type Filter } from './filters.ts';
 	import Settings from './Settings.svelte';
 	import Shortcuts from './Shortcuts.svelte';
+	import Palette from './Palette.svelte';
 	import { register } from './commands.svelte.ts';
 	import { card_nodes } from './card_nodes.ts';
 	import { get_native } from 'gpuix-svelte';
@@ -53,6 +54,7 @@
 	let show_settings = $state(false);
 	let show_shortcuts = $state(false);
 	let filters_open = $state(false);
+	let palette_open = $state(false);
 	let menu = $state<{ list: Notification[]; x: number; y: number } | null>(null);
 	/** The selection (#3): thread ids, as the lanes are windowed and most cards aren't mounted. */
 	let selected = $state(new Set<string>());
@@ -420,7 +422,7 @@
 				title: 'Clear Selection',
 				group: 'edit',
 				keys: 'escape',
-				when: () => !modal() && selected.size > 0,
+				when: () => !modal() && !palette_open && selected.size > 0,
 				run: () => (selected = new Set())
 			},
 			...LANES.map((l, i) => ({
@@ -458,7 +460,7 @@
 				title: 'Clear Focus',
 				group: 'go',
 				keys: 'escape',
-				when: () => !modal() && focus !== null && selected.size === 0,
+				when: () => !modal() && !palette_open && focus !== null && selected.size === 0,
 				run: () => (focus = null)
 			},
 			{
@@ -500,6 +502,7 @@
 				when: () => focus !== null,
 				run: () => flip(focus!.lane)
 			},
+			{ id: 'edit.palette', title: 'Command Palette…', group: 'edit', keys: 'cmd-k', run: () => (palette_open = !palette_open) },
 			{ id: 'help.shortcuts', title: 'Keyboard Shortcuts', group: 'help', keys: 'cmd-/', run: () => (show_shortcuts = !show_shortcuts) },
 			{ id: 'help.setup', title: 'Check gh Setup', group: 'help', run: onsetup },
 			{ id: 'help.report', title: 'Report an Issue', group: 'help', run: () => gh.open_url('https://github.com/jaronoff97/gitbox/issues/new') },
@@ -599,6 +602,22 @@
 	ondialog={(open) => (dialog = open)}
 />
 <Toast {toasts} onopen={open_toast} lift={selection.length > 0 || progress !== null} />
+
+{#if palette_open}
+	<Palette
+		{items}
+		filters={settings.filters}
+		lanes={lanes.map((l) => ({ key: l.key, title: l.title }))}
+		onfilter={filter}
+		onlane={(key) => focus_at(lanes.find((l) => l.key === key), 0)}
+		onopen={(n) => gh.link(n).then(gh.open_url)}
+		onfocus={(n) => {
+			const lane = lanes.find((l) => l.cards.includes(n));
+			focus_at(lane, lane?.cards.indexOf(n) ?? 0);
+		}}
+		onclose={() => (palette_open = false)}
+	/>
+{/if}
 
 {#if show_shortcuts}
 	<Shortcuts onclose={() => (show_shortcuts = false)} />

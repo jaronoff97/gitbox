@@ -112,6 +112,10 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   An `<input>` takes Enter as `onsubmit` and ⌫/← as its own editing keys (no key event), so the
   filter menu's back key is ⌘[. The settings dialog keeps Tab inside it and focuses its first
   control a tick after it mounts, when the controls exist natively.
+- `src/Palette.svelte` — ⌘K (#6): one search over the registry's commands (that apply now), "Filter:"
+  entries from `options()`, "Go to" lanes, and "Open:" notifications (⌘↩ focuses the card).
+  `>`, `#`, `@` narrow it to commands, filters, authors. `src/fuzzy.ts` scores the match; the last
+  5 commands run (`recent` in state.json) lead the empty palette.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
 - `src/Onboarding.svelte` — runs the checks in order and shows a fix hint for a failed one.
