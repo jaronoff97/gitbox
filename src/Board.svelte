@@ -17,6 +17,7 @@
 	import { notifications, PER_PAGE, viewer, type Action, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
 	import { track } from './jobs.svelte.ts';
+	import { open_pr } from './whiteboard.ts';
 	import { LANE_TITLES, lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
 
 	/** Back to onboarding, for when gh stops working after setup (a logout, say). `active`: the
@@ -88,7 +89,7 @@
 		dismiss(t.id);
 	}
 
-	type Change = Exclude<Action, 'open' | 'copy'>;
+	type Change = Exclude<Action, 'open' | 'copy' | 'whiteboard'>;
 	/** Each action that changes GitHub: its gh call, the toast when it works, and the verb when it fails. */
 	const ACTIONS: Record<Change, { run: (n: Notification, body?: string) => Promise<unknown>; done: string; verb: string }> = {
 		read: { run: gh.mark_read, done: 'Marked as read', verb: 'mark as read' },
@@ -118,6 +119,7 @@
 	async function act(action: Action, n: Notification, body?: string): Promise<boolean> {
 		try {
 			if (action === 'open') return (gh.open_url(await gh.link(n)), true);
+			if (action === 'whiteboard') return (toast(await open_pr(n)), true);
 			if (action === 'copy') {
 				const url = await gh.link(n);
 				await gh.copy(url);
@@ -154,7 +156,7 @@
 				(e: Error) => (toast(e.message, true), false)
 			);
 		}
-		if (action === 'comment') return false;
+		if (action === 'comment' || action === 'whiteboard') return false;
 		const undo = new Map(list.map((n) => [n, apply(action, n)]));
 		progress = { verb: DOING[action](list.length), done: 0, total: list.length };
 		const failed = await gh.pool(list, 4, (n) => ACTIONS[action].run(n).finally(() => progress && progress.done++));
@@ -266,7 +268,8 @@
 	}
 
 	const run_action = (action: Action, list: Notification[], body?: string) =>
-		list.length === 1 ? act(action, list[0], body) : bulk(action, list);
+		// Whiteboard opens one PR at a time.
+		list.length === 1 || action === 'whiteboard' ? act(action, list[0], body) : bulk(action, list);
 	let me = $state<{ login: string; avatar_url: string } | null>(null);
 
 	viewer().then((v) => (me = v), () => {});
@@ -492,6 +495,14 @@
 			{ id: 'notification.read', title: 'Mark as Read', group: 'notification', keys: 'r', when: () => !modal() && focused() !== null, run: () => ask('read') },
 			{ id: 'notification.done', title: 'Mark as Done', group: 'notification', keys: 'e', when: () => !modal() && focused() !== null, run: () => ask('done') },
 			{ id: 'notification.unsubscribe', title: 'Unsubscribe', group: 'notification', keys: 'u', when: () => !modal() && focused() !== null, run: () => ask('unsubscribe') },
+			{
+				id: 'notification.whiteboard',
+				title: 'Open in Whiteboard',
+				group: 'notification',
+				keys: 'w',
+				when: () => !modal() && focused()?.subject.type === 'PullRequest',
+				run: () => (request = { action: 'whiteboard', list: [focused()!], seq: ++request_seq })
+			},
 			{ id: 'notification.comment', title: 'Comment…', group: 'notification', keys: 'c', when: () => !modal() && focused() !== null, run: () => ask('comment') },
 			{
 				id: 'notification.close',

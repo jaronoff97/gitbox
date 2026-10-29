@@ -9,6 +9,8 @@ import { menu_json } from './src/menubar.ts';
 import { palette as colors } from './src/theme.ts';
 import { link, type Notification } from './src/gh.ts';
 import { automations, check as check_automations, put } from './src/automations.svelte.ts';
+import { update } from './src/settings.svelte.ts';
+import { execFileSync } from 'node:child_process';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
 // pages of 50 (the last has 40), titled "Note 1" to "Note 290". Note i is PR i, and i % 4 picks
@@ -108,6 +110,30 @@ if (args[0] === 'available') {
 	if (prompt === 'fail') { console.error('Error: \\x1b[31mThe model refused\\x1b[0m'); process.exit(1); }
 	process.stdout.write('You said ' + prompt + ', turn ' + turn);
 	console.error('Transcript saved to: ' + opt('--save-transcript'));
+}
+`,
+	{ mode: 0o755 }
+);
+// A fake `whiteboard` CLI (#22): not running until `app launch`; session_create makes the PR's board
+// the first time and returns it after. Every call goes to the log, with its JSON input as stdin.
+writeFileSync(
+	join(bin, 'whiteboard'),
+	`#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const up = __dirname + '/whiteboard-up';
+fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'whiteboard ' + args.slice(0, 2).join(' '), stdin: args[2] }) + '\\n');
+if (args[0] === 'app' && args[1] === 'launch') {
+	fs.writeFileSync(up, '');
+	console.log(JSON.stringify({ event: 'launched' }));
+} else if (args[0] === 'api') {
+	if (!fs.existsSync(up)) { console.error('Whiteboard stable is not running. Start it with whiteboard app launch.'); process.exit(1); }
+	if (args[1] === 'session_list') console.log('[]');
+	else if (args[1] === 'session_create') {
+		const again = fs.existsSync(up + '-made');
+		fs.writeFileSync(up + '-made', '');
+		console.log(JSON.stringify({ created: !again, sessionId: 's-1', opened: !again }));
+	} else if (args[1] === 'session_open') console.log('{}');
 }
 `,
 	{ mode: 0o755 }
@@ -962,6 +988,40 @@ check('without the model, Chat says why', has('Chat needs macOS 27 or later, wit
 delete process.env.FAKE_NO_FM;
 press('ctrl-1');
 
+// Whiteboard (#22): a PR opens on its board, in a checkout found by its remote under the code folders
+// (two levels down here, in a folder not named like the repository; a decoy named "repo" points
+// elsewhere). The first call starts Whiteboard; the second opens the board that exists.
+const code = mkdtempSync(join(tmpdir(), 'gitbox-code-'));
+const git_repo = (path: string, remote: string) => {
+	execFileSync('git', ['init', '-q', path]);
+	execFileSync('git', ['-C', path, 'remote', 'add', 'origin', remote]);
+};
+git_repo(join(code, 'repo'), 'https://github.com/someone-else/repo.git');
+git_repo(join(code, 'team', 'renamed'), 'git@github.com:Octo/Repo.git');
+update({ code_dirs: code });
+const wb = () => calls().filter((c) => c.cmd.startsWith('whiteboard '));
+await right_click(4);
+click_test_id('menu-whiteboard');
+await wait_for(() => has('Made a Whiteboard for the pull request'), { label: 'the PR in Whiteboard' });
+const made_board = wb().find((c) => c.cmd === 'whiteboard api session_create');
+check(
+	'Open in Whiteboard starts Whiteboard, then makes the board in the checkout with the PR’s remote',
+	wb().map((c) => c.cmd).slice(0, 3).join() === 'whiteboard api session_list,whiteboard app launch,whiteboard api session_list' &&
+		JSON.stringify(JSON.parse(made_board!.stdin!)) ===
+			JSON.stringify({ target: { kind: 'pullRequest', repositoryPath: join(code, 'team', 'renamed'), pullRequest: 'https://github.com/octo/repo/pull/4' } })
+);
+check('the checkout is remembered', saved().repo_paths['octo/repo'] === join(code, 'team', 'renamed'));
+click_test_id('card-4');
+press('w');
+await wait_for(() => has('Opened the pull request’s Whiteboard'), { label: 'w opens the board again' });
+check('w on a PR opens its board, which exists now', wb().some((c) => c.cmd === 'whiteboard api session_open'));
+// Note 20 is a review request in octo/other, which has no checkout here.
+await right_click(20);
+click_test_id('menu-whiteboard');
+await wait_for(() => text().includes('No checkout of octo/other'), { label: 'no checkout' });
+check('a repository with no checkout says where gitbox looked', text().includes(`No checkout of octo/other in ${code}`));
+await wait_for(() => !find_test_id('job'), { label: 'the job ends' });
+
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
 	({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
@@ -983,4 +1043,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 128);
+finish('gitbox', 132);

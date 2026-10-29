@@ -265,6 +265,16 @@
 					/>
 				</div>
 				<div class="row">
+					{@render row('Code folders', 'Where your clones are, split by commas: Open in Whiteboard looks one and two levels down.')}
+					<input
+						class="field"
+						value={settings.code_dirs}
+						placeholder="~/Code"
+						testId="code-dirs"
+						onchange={(e: GpuixEvent) => update({ code_dirs: e.value ?? '' })}
+					/>
+				</div>
+				<div class="row">
 					{@render row('Account', login ? `Signed in as ${login} through the gh CLI.` : 'Signed in through the gh CLI.')}
 					{@render button('Run setup again', 'settings-setup', onsetup)}
 				</div>

@@ -73,6 +73,7 @@
 		return [
 			{ action: 'open', title: many('Open in Browser', `Open ${k} in Browser`) },
 			{ action: 'copy', title: many('Copy Link', `Copy ${k} Links`) },
+			...(k === 1 && one.subject.type === 'PullRequest' ? [{ action: 'whiteboard' as const, title: 'Open in Whiteboard' }] : []),
 			null,
 			...(list.some((n) => n.unread) ? [{ action: 'read' as const, title: many('Mark as Read', `Mark ${k} as Read`) }] : []),
 			{ action: 'done', title: many('Mark as Done', `Mark ${k} as Done`) },

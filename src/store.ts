@@ -12,6 +12,8 @@ export type Saved = {
 	recent?: string[];
 	/** What the automations did, newest first; also what keeps one from acting on a thread twice. */
 	automation_log?: Run[];
+	/** Each GitHub repository's local checkout (`owner/repo` in lower case → path), as Whiteboard needs one (#22). */
+	repo_paths?: Record<string, string>;
 };
 
 // Resolved per call, so a test can point XDG_CONFIG_HOME elsewhere after the imports.

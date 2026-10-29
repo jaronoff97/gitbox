@@ -30,6 +30,8 @@ export type Settings = {
 	gh_host: string;
 	/** Where gh is; empty finds it on PATH. */
 	gh_path: string;
+	/** Folders, split by commas, whose repositories (one or two levels down) Whiteboard can open PRs in (#22). */
+	code_dirs: string;
 	/** The settings tab last open. */
 	tab: string;
 };
@@ -56,6 +58,7 @@ export const DEFAULTS: Settings = {
 	single_keys: true,
 	gh_host: '',
 	gh_path: '',
+	code_dirs: '~/Code',
 	tab: 'general'
 };
 
