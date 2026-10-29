@@ -103,7 +103,7 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   batched GraphQL call (GraphQL has no notifications; `reviewDecision` is left out, as it made a
   page 4 s slower). `gh` runs with Homebrew's directories added to `PATH`, since an app started
   from Finder gets launchd's minimal one.
-- `src/store.ts` — state kept between runs (`onboarded`, `settings`, `automation_log`), as JSON in
+- `src/store.ts` — state kept between runs (`onboarded`, `settings`, `automation_log`, `repo_paths`), as JSON in
   `$XDG_CONFIG_HOME/gitbox` (default `~/.config/gitbox/state.json`); the automations themselves
   are in `automations.json` beside it.
 - `src/commands.svelte.ts` — every command in one registry (#4): id, title, menu group, keys,
@@ -146,7 +146,16 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   as instructions the user's login and their 20 newest unread notifications, as the model's
   context is about 4,000 tokens. The prompt goes through stdin, and the reply streams into a
   `<markdown>`. The chats are module state, so they outlive a switch of tabs. The model only talks
-  for now. The test puts a fake `fm` beside the fake `gh`.
+  for now. `once` asks one question with no conversation (the Whiteboard draft). The test puts a
+  fake `fm` beside the fake `gh`.
+- `src/agents.ts` — who answers, picked in Settings → Models for Chat and for Whiteboard drafts,
+  with an optional model: Apple's `fm`, Claude Code (`claude -p`, stream-json) or Codex
+  (`codex exec --json`), whichever are on PATH. `ask()` is one turn and returns the session that
+  continues it (fm's is the transcript file). A chat runs Claude with `--safe-mode`, no tools and the
+  instructions as the system prompt; Codex gets them in its first prompt, read-only. A Whiteboard
+  draft runs the agent in the PR's checkout with `--permission-mode dontAsk` and only Whiteboard's
+  MCP tools, file reads, `git diff/log/show` and `gh pr view/diff`. A chat keeps the agent and
+  model it started with. The test has fake `claude` and `codex` CLIs.
 - `src/ago.ts` — "now", "5m", "3h", "2d", then a date: cards, automation activity and chats.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
@@ -178,6 +187,24 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   Escape clears. Cards that a filter, refresh or sort hides leave it. The `gh` calls
   (`mark_read`, `mark_done`, `unsubscribe`, `set_state`, `comment`, `copy`) are in `src/gh.ts`;
   a comment goes to `gh` through stdin.
+- `src/whiteboard.ts` — Open in Whiteboard (#22): a PR card's menu, `w`, the palette and the
+  Notification menu. Through the `whiteboard` CLI (in `~/.local/bin`, which `env()` in `gh.ts` adds
+  to PATH): `session_create` with a `pullRequest` target fetches the PR into a local checkout and
+  makes the PR's board, or returns the one it has; `session_open` opens one that didn't open itself.
+  A Whiteboard that isn't running is started with `whiteboard app launch`. The checkout is the one
+  remembered in `repo_paths`, one Whiteboard knows (`session_list`), or a git repository one or
+  two levels under Settings → Advanced → Code folders whose remote is the PR's `owner/repo`. If
+  none has it but a clone's remote is a fork of it (GitHub's `parent` or `source`), `ForkCheckout`
+  names the clone, and the toast's "Add upstream" adds the repository as `upstream` (or its owner's
+  name), in the fork remote's protocol, then opens the PR: Whiteboard fetches a PR only from a
+  remote for its repository. An
+  empty board (`session_get --json` gives `{}`) gets a first draft from Apple's on-device model
+  (`draft`, through `once` in `src/fm.ts`), in the background: a note that the model wrote it, What
+  and why, Changes (each of the 15 largest files: the model's sentence or two, a link to and a
+  `code_peek` of its largest hunk, whose lines come from the diff, not the model; lock files are
+  only listed) and What to check. The structure goes down first, under a Whiteboard activity, so a
+  reader watches it fill. The test has a fake `whiteboard`, real temporary git repositories, and
+  fake answers from `fm`.
 - `src/Toast.svelte` — short messages at the bottom of the window.
 - `src/jobs.svelte.ts`, `src/Jobs.svelte` — background work and its progress popup, in the
   top-right corner under the toolbar on every tab. `track(title, work)` shows a job until `work`
@@ -189,8 +216,8 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
   the subject's API object names.
 - `src/Settings.svelte` — the settings dialog in tabs (#8): General, Board (cards per lane; lanes
-  shown, ordered and sorted), Appearance, Shortcuts (`ShortcutList.svelte`, as ⌘/ shows) and Advanced
-  (pages at once, `gh_host` → GH_HOST, `gh_path`, setup, reset). It opens on the last tab; ⌘[ ⌘]
+  shown, ordered and sorted), Appearance, Shortcuts (`ShortcutList.svelte`, as ⌘/ shows), Models (`src/agents.ts`) and Advanced
+  (pages at once, `gh_host` → GH_HOST, `gh_path`, code folders, setup, reset). It opens on the last tab; ⌘[ ⌘]
   change tabs.
 - `src/theme.ts` — the palettes (Catppuccin Mocha dark, Latte light) and the board's text size and
   density, as CSS variables App sets. GPUI's rem is fixed, so text size scales the board's own

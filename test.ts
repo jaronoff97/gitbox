@@ -1,14 +1,16 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { all_text, bounds, check, click, click_test_id, drag, find_all, find_test_id, finish, hover, mount_headless, press, pump, screenshot, type, wait, wait_for, wheel } from 'gpuix-svelte/test';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, find_all, bounds, screenshot } from 'gpuix-svelte/test';
 import App from './App.svelte';
+import { automations, check as check_automations, put } from './src/automations.svelte.ts';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
-import { menu_json } from './src/menubar.ts';
-import { palette as colors } from './src/theme.ts';
 import { link, type Notification } from './src/gh.ts';
-import { automations, check as check_automations, put } from './src/automations.svelte.ts';
+import { menu_json } from './src/menubar.ts';
+import { update } from './src/settings.svelte.ts';
+import { palette as colors } from './src/theme.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
 // pages of 50 (the last has 40), titled "Note 1" to "Note 290". Note i is PR i, and i % 4 picks
@@ -18,8 +20,8 @@ import { automations, check as check_automations, put } from './src/automations.
 // note is in octo/other, the rest in octo/repo; every third has the label "bug".
 const bin = mkdtempSync(join(tmpdir(), 'gitbox-'));
 writeFileSync(
-	join(bin, 'gh'),
-	`#!${process.execPath}
+  join(bin, 'gh'),
+  `#!${process.execPath}
 const args = process.argv.slice(2);
 const cmd = args.join(' ');
 const reason = (i) => ['review_requested', 'mention', 'subscribed', 'comment'][i % 4];
@@ -54,6 +56,16 @@ else if (page) {
 	console.log(JSON.stringify([[{ summary: 'Bad thing', html_url: 'https://github.com/octo/repo/security/advisories/GHSA-1' }]]));
 } else if (cmd === 'api https://api.github.com/repos/octo/repo/releases/1 --jq .html_url') {
 	console.log('https://github.com/octo/repo/releases/tag/v1');
+} else if (/^api repos\\/[^ ]+ --jq /.test(cmd)) {
+	// A repository's parent and source: me/other is a fork of octo/other; the rest are no forks.
+	console.log(cmd.startsWith('api repos/me/other ') ? 'octo/other octo/other' : ' ');
+} else if (cmd.startsWith('pr diff ')) {
+	// A PR for the Whiteboard draft: a file with two hunks, a deleted file and a lock file.
+	console.log(['diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1,2 +1,3 @@', ' a', '+b', ' c', '@@ -10,2 +10,4 @@', ' x', '+y', '+z', ' w',
+		'diff --git a/old.ts b/old.ts', 'deleted file mode 100644', '--- a/old.ts', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-gone', '-too',
+		'diff --git a/package-lock.json b/package-lock.json', '--- a/package-lock.json', '+++ b/package-lock.json', '@@ -1 +1 @@', '-1', '+2'].join('\\n'));
+} else if (cmd.startsWith('pr view ')) {
+	console.log(JSON.stringify({ title: 'Note 4', body: 'Why it changes.' }));
 } else if ((cmd.startsWith('api -X ') && cmd.includes(' notifications/threads/')) || /^(pr|issue) (close|reopen|comment|review) /.test(cmd)) {
 	// Card actions (#2): logged for the test to read; thread 12 refuses to be marked done.
 	const stdin = cmd.includes('--body-file -') ? require('fs').readFileSync(0, 'utf8') : undefined;
@@ -77,29 +89,38 @@ else if (page) {
 	console.log(JSON.stringify({ data }));
 } else { console.error('unexpected: ' + cmd); process.exit(1); }
 `,
-	{ mode: 0o755 }
+  { mode: 0o755 }
 );
 // A fake `open` and `pbcopy` too, so the test opens no browser and leaves the clipboard alone.
 for (const tool of ['open', 'pbcopy'])
-	writeFileSync(
-		join(bin, tool),
-		`#!${process.execPath}
+  writeFileSync(
+    join(bin, tool),
+    `#!${process.execPath}
 const stdin = ${JSON.stringify(tool)} === 'pbcopy' ? require('fs').readFileSync(0, 'utf8') : undefined;
 require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: ${JSON.stringify(tool)} + ' ' + process.argv.slice(2).join(' '), stdin }) + '\\n');
 `,
-		{ mode: 0o755 }
-	);
+    { mode: 0o755 }
+  );
 // A fake `fm` (Apple's on-device model, #chat): it echoes the prompt with the turn, which it keeps in
 // the transcript file, and logs the call with its instructions. FAKE_NO_FM makes the model missing.
 writeFileSync(
-	join(bin, 'fm'),
-	`#!${process.execPath}
+  join(bin, 'fm'),
+  `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
 const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 if (args[0] === 'available') {
 	if (process.env.FAKE_NO_FM) { console.error('\\x1b[31mApple Intelligence is not enabled\\x1b[0m'); process.exit(1); }
 	console.log('System model available');
+} else if (args[0] === 'respond' && args.includes('--guardrails')) {
+	// A one-shot question for a Whiteboard draft: a file's summary, the opening, or what to check
+	// (quoted, with a bullet inside, as the real model sometimes answers).
+	const prompt = fs.readFileSync(0, 'utf8');
+	const ins = opt('--instructions');
+	fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'fm once', instructions: ins }) + '\\n');
+	if (ins.includes('one file')) process.stdout.write('It changes ' + prompt.match(/^File: (\\S+)/m)[1] + '.');
+	else if (ins.includes('opening')) process.stdout.write('It adds a feature.');
+	else process.stdout.write('"- Check A."\\n- "Check B."');
 } else if (args[0] === 'respond') {
 	const prompt = fs.readFileSync(0, 'utf8');
 	const turn = (opt('--resume') ? JSON.parse(fs.readFileSync(opt('--resume'), 'utf8')).turn : 0) + 1;
@@ -110,12 +131,88 @@ if (args[0] === 'available') {
 	console.error('Transcript saved to: ' + opt('--save-transcript'));
 }
 `,
+  { mode: 0o755 }
+);
+// A fake `whiteboard` CLI (#22): not running until `app launch`; session_create makes the PR's board
+// the first time and returns it after. Every call goes to the log, with its JSON input as stdin.
+writeFileSync(
+  join(bin, 'whiteboard'),
+  `#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const up = __dirname + '/whiteboard-up';
+fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'whiteboard ' + args.slice(0, 2).join(' '), stdin: args[2] }) + '\\n');
+if (args[0] === 'app' && args[1] === 'launch') {
+	fs.writeFileSync(up, '');
+	console.log(JSON.stringify({ event: 'launched' }));
+} else if (args[0] === 'api') {
+	if (!fs.existsSync(up)) { console.error('Whiteboard stable is not running. Start it with whiteboard app launch.'); process.exit(1); }
+	if (args[1] === 'session_list') console.log('[]');
+	else if (args[1] === 'session_create') {
+		// One board per PR: s-<number>.
+		const id = 's-' + JSON.parse(args[2]).target.pullRequest.split('/').pop();
+		const again = fs.existsSync(up + '-made-' + id);
+		fs.writeFileSync(up + '-made-' + id, '');
+		console.log(JSON.stringify({ created: !again, sessionId: id, opened: !again }));
+	} else if (args[1] === 'session_open') console.log('{}');
+	// A board is empty until its first edit.
+	else if (args[1] === 'session_get') console.log(fs.existsSync(up + '-edits-' + JSON.parse(args[2]).sessionId) ? '{"0":{"id":"block-1"}}' : '{}');
+	else if (args[1] === 'session_activity_begin') console.log('{"activityId":"a-1"}');
+	else if (args[1] === 'session_activity_end') console.log('{}');
+	else if (args[1] === 'session_edit') {
+		const edits = up + '-edits-' + JSON.parse(args[2]).sessionId;
+		const k = (fs.existsSync(edits) ? +fs.readFileSync(edits, 'utf8') : 0) + 1;
+		fs.writeFileSync(edits, String(k));
+		console.log(JSON.stringify({ targetId: 'block-' + k, children: [{ id: 'block-' + k + '-1', type: 'markdown' }] }));
+	}
+}
+`,
+  { mode: 0o755 }
+);
+// Fake agent CLIs (Settings → Models): Claude streams its reply and names its session; Codex names a
+// thread and fails on "fail" as Codex does, with the API's error inside its message. In Whiteboard mode
+// Claude calls a Whiteboard tool. Each call is logged with its arguments, stdin and folder.
+writeFileSync(
+	join(bin, 'claude'),
+	`#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const input = fs.readFileSync(0, 'utf8');
+fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'claude', args, stdin: input, cwd: process.cwd() }) + '\\n');
+const out = (e) => console.log(JSON.stringify({ ...e, session_id: 'claude-1' }));
+if (args.includes('--allowedTools')) {
+	out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__plugin_whiteboard_whiteboard__session_edit' }] } });
+	out({ type: 'result', subtype: 'success', is_error: false, result: 'Done.' });
+} else {
+	const reply = 'Claude says ' + input + (args.includes('--resume') ? ' again' : '');
+	out({ type: 'stream_event', event: { type: 'message_start' } });
+	out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: reply } } });
+	out({ type: 'result', subtype: 'success', is_error: false, result: reply });
+}
+`,
+	{ mode: 0o755 }
+);
+writeFileSync(
+	join(bin, 'codex'),
+	`#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const input = fs.readFileSync(0, 'utf8');
+fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'codex', args, stdin: input, cwd: process.cwd() }) + '\\n');
+const out = (e) => console.log(JSON.stringify(e));
+if (args[1] !== 'resume') out({ type: 'thread.started', thread_id: 'codex-1' });
+if (input === 'fail') {
+	out({ type: 'turn.failed', error: { message: JSON.stringify({ type: 'error', status: 400, error: { message: "The 'x' model is not supported." } }) } });
+	process.exit(1);
+}
+out({ type: 'item.completed', item: { type: 'agent_message', text: 'Codex says ' + input.split('\\n').pop() } });
+`,
 	{ mode: 0o755 }
 );
 process.env.FAKE_LOG = join(bin, 'calls.log');
 /** What the fake tools were asked to do, in order. */
 const calls = (): { cmd: string; stdin?: string; instructions?: string }[] =>
-	existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+  existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
 const called = (cmd: string) => calls().some((c) => c.cmd === cmd);
 const settings_filters = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8')).settings.filters.length;
 process.env.PATH = `${bin}:${process.env.PATH}`;
@@ -129,23 +226,23 @@ const text = () => all_text().join('\n');
 const has = (s: string) => all_text().includes(s);
 /** Whether card `id` sits inside lane `key`, by painted x. */
 const in_lane = (id: number, key: string) => {
-	const c = bounds(find_test_id(`card-${id}`)!);
-	const l = bounds(find_test_id(`lane-${key}`)!);
-	return !!c && !!l && c.x >= l.x && c.x + c.width <= l.x + l.width;
+  const c = bounds(find_test_id(`card-${id}`)!);
+  const l = bounds(find_test_id(`lane-${key}`)!);
+  return !!c && !!l && c.x >= l.x && c.x + c.width <= l.x + l.width;
 };
 
 /** Scrolls a lane down in 1500 px wheels, as a trackpad does: a windowed list knows the heights of
  * its mounted rows only, so one huge jump stops short. Headless, a list draws a wheel scroll, and
  * reports its new visible range, only on a later frame, so each wheel gets a moment and a pump. */
 async function scroll_lane(key: string, steps = 10) {
-	for (let k = 0; k < steps; k++) {
-		wheel(find_test_id(`lane-${key}`)!, 0, -1500);
-		await wait(40);
-		pump();
-	}
-	wheel(find_test_id(`lane-${key}`)!, 0, -1);
-	await wait(60);
-	pump();
+  for (let k = 0; k < steps; k++) {
+    wheel(find_test_id(`lane-${key}`)!, 0, -1500);
+    await wait(40);
+    pump();
+  }
+  wheel(find_test_id(`lane-${key}`)!, 0, -1);
+  await wait(60);
+  pump();
 }
 
 let app = mount_headless(App, { width: 1470, height: 800 });
@@ -168,8 +265,8 @@ check('a card shows its PR’s number after the repository', has('#4') && has('#
 if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-cards.png'));
 check('the board has the four lanes', ['Todo', 'Requested', 'Waiting on me', 'Merged / Closed'].every(has));
 check(
-	'each card goes in the lane for its reason and state',
-	in_lane(4, 'requested') && in_lane(5, 'waiting') && in_lane(6, 'todo') && in_lane(7, 'done')
+  'each card goes in the lane for its reason and state',
+  in_lane(4, 'requested') && in_lane(5, 'waiting') && in_lane(6, 'todo') && in_lane(7, 'done')
 );
 check('every lane starts with 50 cards', text().includes('200+ unread') && badges('50+') === 4);
 check('a lane mounts a window of rows, not all of them', has('Note 4') && !has('Note 200'));
@@ -192,14 +289,14 @@ check('Todo gets its cards without other lanes', !has('Note 201') && !has('Note 
 
 // The thumb is GPUI's and can't be dragged, so a strip over it scrolls to the row at the pointer.
 {
-	const strip = bounds(find_test_id('gutter-waiting')!)!;
-	const x = strip.x + strip.width / 2;
-	const full = badges('50+');
-	drag({ x, y: strip.y + 5 }, { x, y: strip.y + strip.height - 2 }, { steps: 6 });
-	await wait(60);
-	pump();
-	await wait_for(() => has('73'), { label: 'a drag to the end of Waiting on me' });
-	check('dragging the scroll strip to the end grows that lane only', has('73') && badges('50+') === full - 1);
+  const strip = bounds(find_test_id('gutter-waiting')!)!;
+  const x = strip.x + strip.width / 2;
+  const full = badges('50+');
+  drag({ x, y: strip.y + 5 }, { x, y: strip.y + strip.height - 2 }, { steps: 6 });
+  await wait(60);
+  pump();
+  await wait_for(() => has('73'), { label: 'a drag to the end of Waiting on me' });
+  check('dragging the scroll strip to the end grows that lane only', has('73') && badges('50+') === full - 1);
 }
 
 click_test_id('add-filter');
@@ -230,53 +327,53 @@ await wait_for(() => has('Note 4'), { label: 'the filters cleared' });
 check('Clear removes every filter', has('Note 6') && saved().settings.filters.length === 0);
 
 const sample = {
-	reason: 'mention',
-	subject: { type: 'PullRequest' },
-	repository: { full_name: 'a/b' },
-	labels: [{ name: 'bug', color: '' }],
-	state: 'OPEN',
-	draft: true,
-	reviews: 4
+  reason: 'mention',
+  subject: { type: 'PullRequest' },
+  repository: { full_name: 'a/b' },
+  labels: [{ name: 'bug', color: '' }],
+  state: 'OPEN',
+  draft: true,
+  reviews: 4
 } as unknown as Notification;
 check(
-	'filters match any value of one field and every field',
-	matches(sample, [
-		{ field: 'repo', value: 'x/y' },
-		{ field: 'repo', value: 'a/b' },
-		{ field: 'label', value: 'bug' }
-	]) && !matches(sample, [
-		{ field: 'repo', value: 'a/b' },
-		{ field: 'label', value: 'docs' }
-	])
+  'filters match any value of one field and every field',
+  matches(sample, [
+    { field: 'repo', value: 'x/y' },
+    { field: 'repo', value: 'a/b' },
+    { field: 'label', value: 'bug' }
+  ]) && !matches(sample, [
+    { field: 'repo', value: 'a/b' },
+    { field: 'label', value: 'docs' }
+  ])
 );
 check(
-	'an open draft has the state draft, and 4 reviews count as 3+',
-	matches(sample, [
-		{ field: 'state', value: 'draft' },
-		{ field: 'reviews', value: '3+' }
-	]) && !matches(sample, [{ field: 'state', value: 'open' }])
+  'an open draft has the state draft, and 4 reviews count as 3+',
+  matches(sample, [
+    { field: 'state', value: 'draft' },
+    { field: 'reviews', value: '3+' }
+  ]) && !matches(sample, [{ field: 'state', value: 'open' }])
 );
 
 // Oldest first: Waiting on me holds 1, 5, … 289, so its oldest is Note 289, on the last page.
 click_test_id('sort-waiting');
 await wait_for(() => has('Note 289'), { label: 'Waiting on me, oldest first' });
 check(
-	'oldest first puts the oldest card of the lane at its top',
-	bounds(find_test_id('card-289')!)!.y < bounds(find_test_id('card-285')!)!.y && !has('Note 1')
+  'oldest first puts the oldest card of the lane at its top',
+  bounds(find_test_id('card-289')!)!.y < bounds(find_test_id('card-285')!)!.y && !has('Note 1')
 );
 check('a sort changes only its own lane', has('Note 2') && has('Note 4'));
 check('the sort is saved', saved().settings.lane_sort.waiting === 'asc');
 
 // Card actions (#2): a right click opens the menu at the card.
 const right_click = async (id: number) => {
-	click_test_id(`card-${id}`, { button: 2 });
-	await wait_for(() => has('Mark as Done'), { label: `the menu of card ${id}` });
+  click_test_id(`card-${id}`, { button: 2 });
+  await wait_for(() => has('Mark as Done'), { label: `the menu of card ${id}` });
 };
 await right_click(4);
 check(
-	'the menu of an open PR offers its actions',
-	['Open in Browser', 'Copy Link', 'Mark as Read', 'Mark as Done', 'Unsubscribe', 'Comment…', 'Close pull request…'].every(has) &&
-		!has('Reopen pull request')
+  'the menu of an open PR offers its actions',
+  ['Open in Browser', 'Copy Link', 'Mark as Read', 'Mark as Done', 'Unsubscribe', 'Comment…', 'Close pull request…'].every(has) &&
+  !has('Reopen pull request')
 );
 click_test_id('menu-open');
 await wait_for(() => called('open https://github.com/octo/repo/pull/4'), { label: 'open in the browser' });
@@ -341,8 +438,8 @@ press('cmd-enter');
 await wait_for(() => called('pr comment https://github.com/octo/repo/pull/4 --body-file -'), { label: 'comment' });
 check('⌘↩ in the comment field sends, and opens nothing', calls().filter((c) => c.cmd.startsWith('open ')).length === opens);
 check(
-	'a comment reaches gh unchanged, through stdin',
-	calls().find((c) => c.cmd.startsWith('pr comment'))?.stdin === "hi 'a'\nb"
+  'a comment reaches gh unchanged, through stdin',
+  calls().find((c) => c.cmd.startsWith('pr comment'))?.stdin === "hi 'a'\nb"
 );
 await wait_for(() => !has('Comment on octo/repo #4'), { label: 'the dialog closes after sending' });
 press('cmd-enter');
@@ -365,9 +462,9 @@ check('selecting opens nothing', opened() === before_select);
 await scroll_lane('requested', 3);
 check('a selection keeps cards that scroll out of view', has('4 selected') && !find_test_id('card-4'));
 for (let k = 0; k < 6; k++) {
-	wheel(find_test_id('lane-requested')!, 0, 2000);
-	await wait(40);
-	pump();
+  wheel(find_test_id('lane-requested')!, 0, 2000);
+  await wait(40);
+  pump();
 }
 await wait_for(() => find_test_id('card-4') !== null, { label: 'back at the top of Requested' });
 
@@ -377,12 +474,12 @@ await wait_for(() => has('Mark 4 as Done'), { label: 'the menu for the selection
 click_test_id('menu-done');
 await wait_for(() => text().includes('1 of 4 failed: HTTP 403: Forbidden'), { label: 'a bulk done with one failure' });
 check(
-	'a bulk action calls gh once for each card',
-	[6, 4, 12, 28].every((id) => called(`api -X DELETE notifications/threads/${id}`))
+  'a bulk action calls gh once for each card',
+  [6, 4, 12, 28].every((id) => called(`api -X DELETE notifications/threads/${id}`))
 );
 check(
-	'only the card whose call failed comes back, and stays selected',
-	!find_test_id('card-6') && !find_test_id('card-4') && !find_test_id('card-28') && find_test_id('card-12') !== null && has('1 selected')
+  'only the card whose call failed comes back, and stays selected',
+  !find_test_id('card-6') && !find_test_id('card-4') && !find_test_id('card-28') && find_test_id('card-12') !== null && has('1 selected')
 );
 press('escape');
 await wait_for(() => !has('1 selected'), { label: 'Escape clears the selection' });
@@ -414,8 +511,8 @@ await wait_for(() => has('2 selected'), { label: 'two todo cards' });
 click_test_id('bulk-copy');
 await wait_for(() => text().includes('Copied 2 links'), { label: 'copy links' });
 check(
-	'Copy Links puts every link on the clipboard, one a line',
-	calls().some((c) => c.cmd === 'pbcopy ' && c.stdin === 'https://github.com/octo/repo/pull/10\nhttps://github.com/octo/repo/pull/14')
+  'Copy Links puts every link on the clipboard, one a line',
+  calls().some((c) => c.cmd === 'pbcopy ' && c.stdin === 'https://github.com/octo/repo/pull/10\nhttps://github.com/octo/repo/pull/14')
 );
 click_test_id('bulk-clear');
 
@@ -464,8 +561,8 @@ await wait_for(() => has('Requested'), { label: '⌘2 shows it again' });
 press('cmd-/');
 await wait_for(() => has('Keyboard Shortcuts'), { label: '⌘/' });
 check(
-	'⌘/ lists the shortcuts, with their keys',
-	['Refresh', 'Settings…', 'Select All Cards', 'Show Requested', 'Clear Selection'].every(has) && has('⌘') && has('R')
+  '⌘/ lists the shortcuts, with their keys',
+  ['Refresh', 'Settings…', 'Select All Cards', 'Show Requested', 'Clear Selection'].every(has) && has('⌘') && has('R')
 );
 press('escape');
 await wait_for(() => !has('Keyboard Shortcuts'), { label: 'Escape closes the shortcuts' });
@@ -561,17 +658,17 @@ press('escape');
 
 // The ⌘K palette (#6): commands from the registry, filters, lanes and notifications.
 check(
-	'the fuzzy match: in order, word starts and runs first',
-	score('xyz', 'Refresh') === null &&
-		score('sc', 'Show Commands')! > score('sc', 'Disconnect')! &&
-		score('ref', 'Refresh')! > score('ref', 'Rename Filter')!
+  'the fuzzy match: in order, word starts and runs first',
+  score('xyz', 'Refresh') === null &&
+  score('sc', 'Show Commands')! > score('sc', 'Disconnect')! &&
+  score('ref', 'Refresh')! > score('ref', 'Rename Filter')!
 );
 const palette = async (keys: string) => {
-	press('cmd-k');
-	await wait_for(() => find_test_id('palette') !== null, { label: '⌘K' });
-	await wait(50);
-	if (keys) type(keys);
-	await wait(50);
+  press('cmd-k');
+  await wait_for(() => find_test_id('palette') !== null, { label: '⌘K' });
+  await wait(50);
+  if (keys) type(keys);
+  await wait(50);
 };
 const loads_6 = loads();
 await palette('r e f r');
@@ -631,27 +728,27 @@ check('arrows in the palette leave the board alone', calls().filter((c) => c.cmd
 // The menu bar (#7) comes from the registry: menus in the macOS order, ⌘ keys as key equivalents,
 // single keys and the ones a text field needs (⌘A, ⌘↩) as hints only, toggles with their check.
 {
-	const menus = menu_json();
-	const find = (menu: string, title: string) => menus.find((m) => m.title === menu)?.items.find((i) => i.title === title);
-	check(
-		'the menu bar has the Mac menus in order',
-		menus.map((m) => m.title).join(',') === 'Gitbox,File,Edit,View,Go,Notification,Window,Help'
-	);
-	check(
-		'⌘ shortcuts are key equivalents; single keys and ⌘A are hints',
-		find('File', 'Refresh')?.keys === 'cmd-r' &&
-			find('Go', 'Next Card')?.hint === 'J' &&
-			!find('Go', 'Next Card')?.keys &&
-			find('Edit', 'Select All Cards')?.hint === '⌘A' &&
-			!find('Edit', 'Select All Cards')?.keys
-	);
-	check(
-		'toggles carry their state, and the standard items their roles',
-		find('View', 'Show Todo')?.checked === true &&
-			find('Gitbox', 'Quit Gitbox')?.role === 'quit' &&
-			find('Edit', 'Copy')?.role === 'copy' &&
-			!find('Edit', 'Copy')?.keys
-	);
+  const menus = menu_json();
+  const find = (menu: string, title: string) => menus.find((m) => m.title === menu)?.items.find((i) => i.title === title);
+  check(
+    'the menu bar has the Mac menus in order',
+    menus.map((m) => m.title).join(',') === 'Gitbox,File,Edit,View,Go,Notification,Window,Help'
+  );
+  check(
+    '⌘ shortcuts are key equivalents; single keys and ⌘A are hints',
+    find('File', 'Refresh')?.keys === 'cmd-r' &&
+    find('Go', 'Next Card')?.hint === 'J' &&
+    !find('Go', 'Next Card')?.keys &&
+    find('Edit', 'Select All Cards')?.hint === '⌘A' &&
+    !find('Edit', 'Select All Cards')?.keys
+  );
+  check(
+    'toggles carry their state, and the standard items their roles',
+    find('View', 'Show Todo')?.checked === true &&
+    find('Gitbox', 'Quit Gitbox')?.role === 'quit' &&
+    find('Edit', 'Copy')?.role === 'copy' &&
+    !find('Edit', 'Copy')?.keys
+  );
 }
 
 const dialog_open = () => find_test_id('settings-dialog') !== null;
@@ -677,8 +774,8 @@ const x = (key: string) => bounds(find_test_id(`lane-${key}`)!)!.x;
 click_test_id('lane-up-waiting');
 await wait_for(() => x('waiting') < x('requested'), { label: 'Waiting on me moves left' });
 check(
-	'↑ moves a lane earlier on the board, and the order is saved',
-	saved().settings.lanes.map((l: { key: string }) => l.key).join(',') === 'todo,waiting,requested,done'
+  '↑ moves a lane earlier on the board, and the order is saved',
+  saved().settings.lanes.map((l: { key: string }) => l.key).join(',') === 'todo,waiting,requested,done'
 );
 click_test_id('lane-down-waiting');
 await wait_for(() => x('waiting') > x('requested'), { label: 'and back' });
@@ -721,8 +818,17 @@ press('cmd-,');
 await wait_for(() => has('Single-key shortcuts'), { label: '⌘, opens on the last tab' });
 click_test_id('toggle-single_keys');
 press('cmd-]');
-await wait_for(() => has('Pages fetched at once'), { label: '⌘] goes to Advanced' });
+await wait_for(() => has('Whiteboard drafts'), { label: '⌘] goes to Models' });
 check('the dialog remembers its tab, and ⌘] moves on', saved().settings.single_keys === true);
+// Models: the agents found on PATH (here fm, claude and codex, all fakes); an agent's model is a field.
+check('Models offers the agents on PATH', badges('Apple') === 2 && badges('Claude') === 2 && badges('Codex') === 2 && !find_test_id('chat-model'));
+click_test_id('chat_agent-claude');
+pump();
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-models.png'));
+check('an agent gets a model field, and the choice is saved', !!find_test_id('chat-model') && saved().settings.chat_agent === 'claude');
+click_test_id('chat_agent-fm');
+press('cmd-]');
+await wait_for(() => has('Pages fetched at once'), { label: '⌘] goes to Advanced' });
 
 // The dialog by keyboard: its first control (a tab) has the focus; ← and → change tabs, and on a
 // choice they change the option.
@@ -733,8 +839,8 @@ await wait_for(dialog_open, { label: '⌘, opens settings' });
 // The dialog takes the focus a tick after it mounts, when its controls exist natively.
 await wait(100);
 press('left');
-await wait_for(() => has('Single-key shortcuts'), { label: '← on the tabs' });
-check('← and → on the tabs change the tab', has('Single-key shortcuts'));
+await wait_for(() => has('Whiteboard drafts'), { label: '← on the tabs' });
+check('← and → on the tabs change the tab', has('Whiteboard drafts'));
 click_test_id('tab-board');
 await wait_for(() => has('Cards per lane'), { label: 'the Board tab again' });
 click_test_id('lane_size-25');
@@ -838,15 +944,15 @@ click_test_id('automation-save');
 pump();
 const made = automations_json()[0];
 check(
-	'a new automation is saved with its conditions and steps',
-	made?.name === 'bob' &&
-		JSON.stringify(made.when) ===
-			JSON.stringify([
-				{ field: 'reason', value: 'review requested' },
-				{ field: 'author', value: 'bob' },
-				{ field: 'org', value: 'Octo' }
-			]) &&
-		made.then.join() === 'approve,done'
+  'a new automation is saved with its conditions and steps',
+  made?.name === 'bob' &&
+  JSON.stringify(made.when) ===
+  JSON.stringify([
+    { field: 'reason', value: 'review requested' },
+    { field: 'author', value: 'bob' },
+    { field: 'org', value: 'Octo' }
+  ]) &&
+  made.then.join() === 'approve,done'
 );
 check('the list describes it', has('When reason is review requested and author is bob and organization is Octo, approve the pull request, then mark as done.'));
 
@@ -894,7 +1000,7 @@ press('ctrl-1');
 const turns = () => calls().filter((c) => c.cmd === 'fm respond');
 /** The model's replies: markdown, which GPUI keeps as source rather than text. */
 const replies = () =>
-	find_all((n) => n.testId === 'chat-reply').map((n) => (n as { customProps?: { source?: string } }).customProps?.source);
+  find_all((n) => n.testId === 'chat-reply').map((n) => (n as { customProps?: { source?: string } }).customProps?.source);
 press('ctrl-3');
 await wait_for(() => !!find_test_id('chat-input'), { label: 'the model is ready' });
 click_test_id('chat-input');
@@ -903,8 +1009,8 @@ press('enter');
 await wait_for(() => replies().includes('You said hi, turn 1'), { label: 'the first reply' });
 await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
 check(
-	'the first turn sends the prompt, with the notifications as instructions',
-	turns()[0].stdin === 'hi' && !!turns()[0].instructions?.includes('The user is octocat') && !!turns()[0].instructions?.includes('"Note 1"')
+  'the first turn sends the prompt, with the notifications as instructions',
+  turns()[0].stdin === 'hi' && !!turns()[0].instructions?.includes('The user is octocat') && !!turns()[0].instructions?.includes('"Note 1"')
 );
 type('a g a i n');
 press('enter');
@@ -935,9 +1041,9 @@ await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
 // messages and resumes its transcript, and Delete removes both files.
 const chats_dir = join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'chats');
 const saved_chats = () =>
-	readdirSync(chats_dir)
-		.filter((f) => !f.endsWith('.fm.json'))
-		.map((f) => JSON.parse(readFileSync(join(chats_dir, f), 'utf8')) as { id: string; title: string; messages: unknown[] });
+  readdirSync(chats_dir)
+    .filter((f) => !f.endsWith('.fm.json'))
+    .map((f) => JSON.parse(readFileSync(join(chats_dir, f), 'utf8')) as { id: string; title: string; messages: unknown[] });
 const first_chat = saved_chats().find((c) => c.title === 'hi')!;
 check('both chats are saved, with their messages', saved_chats().length === 2 && first_chat.messages.length === 6);
 check('the list holds both, by their first message', has('hi') && has('new'));
@@ -953,8 +1059,8 @@ check('a past chat resumes its transcript', turns()[4].instructions === undefine
 click_test_id(`chat-delete-${first_chat.id}`);
 pump();
 check(
-	'Delete removes a chat and its transcript',
-	saved_chats().length === 1 && !existsSync(join(chats_dir, `${first_chat.id}.fm.json`)) && !has('again')
+  'Delete removes a chat and its transcript',
+  saved_chats().length === 1 && !existsSync(join(chats_dir, `${first_chat.id}.fm.json`)) && !has('again')
 );
 process.env.FAKE_NO_FM = '1';
 press('ctrl-1');
@@ -962,27 +1068,176 @@ press('ctrl-3');
 await wait_for(() => has('Apple Intelligence is not enabled'), { label: 'no model' });
 check('without the model, Chat says why', has('Chat needs macOS 27 or later, with Apple Intelligence on.'));
 delete process.env.FAKE_NO_FM;
+
+// Settings → Models: a new chat goes to Claude Code with its model and the chat's instructions as the
+// system prompt, and no tools; its next turn resumes Claude's session. A Codex chat gets the
+// instructions in its first prompt, resumes its thread, and shows the API's error from inside
+// Codex's message. A chat keeps the agent it started with.
+const agent_calls = (cmd: string) => calls().filter((c) => c.cmd === cmd) as unknown as { args: string[]; stdin: string; cwd: string }[];
+const say = async (keys: string, reply: string) => {
+  click_test_id('chat-input');
+  type(keys);
+  press('enter');
+  await wait_for(() => replies().includes(reply), { label: reply });
+  await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+};
+update({ chat_agent: 'claude', chat_model: 'haiku' });
+// The chat open here was deleted above, so it is a new one already.
+if (find_test_id('chat-new')) click_test_id('chat-new');
+await wait_for(() => !!find_test_id('chat-input'), { label: 'a Claude chat' });
+check('the header names the agent, its model and where the words go', has('Claude Code (haiku): what you ask goes to Anthropic'));
+await say('h e l l o', 'Claude says hello');
+const first_claude = agent_calls('claude')[0].args;
+check(
+  'a Claude chat has its model, no tools, and the instructions as its system prompt',
+  first_claude.includes('--safe-mode') && first_claude[first_claude.indexOf('--model') + 1] === 'haiku' &&
+  first_claude[first_claude.indexOf('--tools') + 1] === '' && first_claude[first_claude.indexOf('--system-prompt') + 1].includes('The user is octocat')
+);
+await say('m o r e', 'Claude says more again');
+check('its next turn resumes Claude’s session', agent_calls('claude')[1].args.join(' ').includes('--resume claude-1'));
+const claude_chat = saved_chats().find((c) => c.title === 'hello')!;
+update({ chat_agent: 'codex', chat_model: '' });
+click_test_id('chat-new');
+await say('h i', 'Codex says hi');
+check('a Codex chat starts with the instructions in its prompt', agent_calls('codex')[0].stdin.startsWith('You are the assistant in Gitbox'));
+await say('a g a i n', 'Codex says again');
+check('and resumes its thread', agent_calls('codex')[1].args.slice(0, 2).join() === 'exec,resume' && agent_calls('codex')[1].args.includes('codex-1'));
+click_test_id('chat-input');
+type('f a i l');
+press('enter');
+await wait_for(() => has("The 'x' model is not supported."), { label: 'a Codex error' });
+check('a Codex error shows its message', has("The 'x' model is not supported."));
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+click_test_id(`chat-${claude_chat.id}`);
+pump();
+await say('b a c k', 'Claude says back again');
+check('a chat keeps the agent it started with', agent_calls('claude').length === 3 && agent_calls('codex').length === 3);
+update({ chat_agent: 'fm', chat_model: '' });
 press('ctrl-1');
+
+// Whiteboard (#22): a PR opens on its board, in a checkout found by its remote under the code folders
+// (two levels down here, in a folder not named like the repository; a decoy named "repo" points
+// elsewhere). The first call starts Whiteboard; the second opens the board that exists.
+const code = mkdtempSync(join(tmpdir(), 'gitbox-code-'));
+const git_repo = (path: string, remote: string) => {
+  execFileSync('git', ['init', '-q', path]);
+  execFileSync('git', ['-C', path, 'remote', 'add', 'origin', remote]);
+};
+git_repo(join(code, 'repo'), 'https://github.com/someone-else/repo.git');
+git_repo(join(code, 'team', 'renamed'), 'git@github.com:Octo/Repo.git');
+update({ code_dirs: code });
+const wb = () => calls().filter((c) => c.cmd.startsWith('whiteboard '));
+await right_click(4);
+click_test_id('menu-whiteboard');
+await wait_for(() => has('Made a Whiteboard for the pull request'), { label: 'the PR in Whiteboard' });
+const made_board = wb().find((c) => c.cmd === 'whiteboard api session_create');
+check(
+  'Open in Whiteboard starts Whiteboard, then makes the board in the checkout with the PR’s remote',
+  wb().map((c) => c.cmd).slice(0, 3).join() === 'whiteboard api session_list,whiteboard app launch,whiteboard api session_list' &&
+  JSON.stringify(JSON.parse(made_board!.stdin!)) ===
+  JSON.stringify({ target: { kind: 'pullRequest', repositoryPath: join(code, 'team', 'renamed'), pullRequest: 'https://github.com/octo/repo/pull/4' } })
+);
+check('the checkout is remembered', saved().repo_paths['octo/repo'] === join(code, 'team', 'renamed'));
+// The new board is empty: Apple's on-device model drafts it. The structure goes down first, each
+// summarized file gets a link and a peek at its largest hunk, a lock file is only listed, and the
+// placeholder becomes the summary.
+await wait_for(() => has('Drafted the Whiteboard for Note 4'), { timeout: 8000, label: 'the draft' });
+const edits = wb()
+  .filter((c) => c.cmd === 'whiteboard api session_edit')
+  .map((c) => JSON.parse(c.stdin!) as { activityId: string; edit: { type: string; parentId?: string; targetId?: string; changes?: { markdown: string }; content?: { type: string; title?: string; markdown?: string; source?: string; children?: { markdown: string }[] } } });
+const contents = edits.map((e) => e.edit.content);
+check(
+  'the draft writes a note, What and why, and Changes first',
+  contents[0]?.type === 'callout' && contents[1]?.title === 'What and why' && contents[2]?.title === 'Changes' && edits.every((e) => e.activityId === 'a-1')
+);
+check(
+  'a summarized file links its largest hunk and peeks at it',
+  contents.some((c) => c?.markdown === '**[src/a.ts](whiteboard:source/head/src/a.ts#L10-L13)** · +3 −0\n\nIt changes src/a.ts.') &&
+  contents.some((c) => c?.type === 'code_peek' && c.source === 'head/src/a.ts#L10-L13') &&
+  contents.some((c) => c?.markdown === '**old.ts** · +0 −2\n\nIt changes old.ts.') &&
+  contents.some((c) => c?.markdown === 'Also changed: `package-lock.json` (+1 −1).')
+);
+check(
+  'the summary replaces the placeholder, and What to check comes as clean bullets',
+  edits.some((e) => e.edit.type === 'update' && e.edit.targetId === 'block-2-1' && e.edit.changes?.markdown === 'It adds a feature.') &&
+  contents.at(-1)?.title === 'What to check' && contents.at(-1)?.children?.[0].markdown === '- Check A.\n- Check B.'
+);
+check('the draft ends its activity', wb().some((c) => c.cmd === 'whiteboard api session_activity_end'));
+click_test_id('card-4');
+press('w');
+await wait_for(() => has('Opened the pull request’s Whiteboard'), { label: 'w opens the board again' });
+check(
+  'w on a PR opens its board, which exists now and has content, so nothing drafts it again',
+  wb().some((c) => c.cmd === 'whiteboard api session_open') && calls().filter((c) => c.cmd === 'fm once').length === 4
+);
+// With Claude Code chosen for drafts, Claude writes an empty board itself, in the PR's checkout, with
+// Whiteboard's tools and only read-only others; the popup shows the tool it calls.
+update({ whiteboard_agent: 'claude', whiteboard_model: 'sonnet' });
+await right_click(8);
+click_test_id('menu-whiteboard');
+await wait_for(() => has('Claude Code wrote the Whiteboard for Note 8'), { label: 'Claude drafts the board' });
+const drafter = agent_calls('claude').at(-1)!;
+check(
+  'Claude writes the board in the checkout, with Whiteboard’s tools and its model',
+  drafter.cwd === realpathSync(join(code, 'team', 'renamed')) && drafter.stdin.includes('session s-8') &&
+  drafter.args.includes('mcp__plugin_whiteboard_whiteboard') && !drafter.args.includes('Bash') && drafter.args[drafter.args.indexOf('--model') + 1] === 'sonnet'
+);
+update({ whiteboard_agent: 'fm', whiteboard_model: '' });
+// Note 20 is a review request in octo/other, which has no checkout here.
+await right_click(20);
+click_test_id('menu-whiteboard');
+await wait_for(() => text().includes('No checkout of octo/other'), { label: 'no checkout' });
+check('a repository with no checkout says where gitbox looked', text().includes(`No checkout of octo/other in ${code}`));
+await wait_for(() => !find_test_id('job'), { label: 'the job ends' });
+// A clone of the user's fork has no remote for the PR's repository, which Whiteboard fetches from:
+// gitbox names the clone and the fork, and adds the repository as upstream (in the fork remote's
+// protocol) only when asked; then the PR opens there. A clone named alike that is no fork isn't offered.
+git_repo(join(code, 'other'), 'https://github.com/stranger/other.git');
+git_repo(join(code, 'mine', 'other'), 'git@github.com:me/other.git');
+const upstream = () => {
+  try {
+    return execFileSync('git', ['-C', join(code, 'mine', 'other'), 'remote', 'get-url', 'upstream'], { stdio: 'pipe' }).toString().trim();
+  } catch {
+    return '';
+  }
+};
+await right_click(20);
+click_test_id('menu-whiteboard');
+await wait_for(() => text().includes('is a clone of the fork me/other'), { label: 'a fork’s clone' });
+check(
+  'a fork’s clone is named, and nothing changes until asked',
+  text().includes(`${join(code, 'mine', 'other')} is a clone of the fork me/other, with no remote for octo/other.`) && has('Add upstream') && upstream() === ''
+);
+click(find_test_id('toast-open', { last: true })!);
+const create_20 = () => wb().find((c) => c.cmd === 'whiteboard api session_create' && c.stdin!.includes('/pull/20'));
+await wait_for(() => !!create_20() && text().includes('Added octo/other to'), { label: 'upstream, then the PR' });
+check(
+  'Add upstream adds the repository in the fork’s protocol, and the PR opens in that clone',
+  upstream() === 'git@github.com:octo/other.git' &&
+  JSON.parse(create_20()!.stdin!).target.repositoryPath === join(code, 'mine', 'other')
+);
+await wait_for(() => has('Drafted the Whiteboard for Note 20'), { timeout: 8000, label: 'its draft' });
+await wait_for(() => !find_test_id('job'), { label: 'the job ends' });
 
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
-	({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
+  ({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
 check(
-	'an advisory card opens the advisory',
-	(await link(subject('RepositoryAdvisory', 'Bad thing', null))) === 'https://github.com/octo/repo/security/advisories/GHSA-1'
+  'an advisory card opens the advisory',
+  (await link(subject('RepositoryAdvisory', 'Bad thing', null))) === 'https://github.com/octo/repo/security/advisories/GHSA-1'
 );
 check(
-	'an advisory that is not found opens the advisory list',
-	(await link(subject('RepositoryAdvisory', 'Unknown', null))) === 'https://github.com/octo/repo/security/advisories'
+  'an advisory that is not found opens the advisory list',
+  (await link(subject('RepositoryAdvisory', 'Unknown', null))) === 'https://github.com/octo/repo/security/advisories'
 );
 check(
-	'a release card opens the release',
-	(await link(subject('Release', 'v1', 'https://api.github.com/repos/octo/repo/releases/1'))) ===
-		'https://github.com/octo/repo/releases/tag/v1'
+  'a release card opens the release',
+  (await link(subject('Release', 'v1', 'https://api.github.com/repos/octo/repo/releases/1'))) ===
+  'https://github.com/octo/repo/releases/tag/v1'
 );
 check(
-	'a PR card opens the PR',
-	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
+  'a PR card opens the PR',
+  (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 129);
+finish('gitbox', 149);

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Portal from 'gpuix-svelte/components/Portal.svelte';
 
-	type Toast = { id: number; text: string; error: boolean; open?: () => void };
+	type Toast = { id: number; text: string; error: boolean; open?: () => void; action?: string };
 
 	/** Short messages at the bottom of the window; Board adds them and takes them away on a timer. One
 	 * that can open what its action touched shows ⌘↩ and takes a click. */
@@ -18,7 +18,7 @@
 						<div>{t.text}</div>
 						<div class="open">
 							<div class="key">⌘↩</div>
-							<div>Open</div>
+							<div>{t.action ?? 'Open'}</div>
 						</div>
 					</div>
 				{:else}

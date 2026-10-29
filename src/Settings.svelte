@@ -13,6 +13,7 @@
 	import { close } from './icons.ts';
 	import { DEFAULTS, LANE_TITLES, move_lane, settings, toggle_lane, update, type Settings } from './settings.svelte.ts';
 	import ShortcutList from './ShortcutList.svelte';
+	import { AGENTS, agent, installed } from './agents.ts';
 	import { state_file } from './store.ts';
 
 	let { login, onclose, onsetup }: { login: string; onclose: () => void; onsetup: () => void } = $props();
@@ -40,7 +41,7 @@
 
 	const pressed = (e: GpuixEvent) => e.key === 'space' || e.key === 'enter';
 
-	type Choice = 'lane_size' | 'batch' | 'refresh_minutes' | 'theme' | 'density' | 'text_size';
+	type Choice = 'lane_size' | 'batch' | 'refresh_minutes' | 'theme' | 'density' | 'text_size' | 'chat_agent' | 'whiteboard_agent';
 	type Value = Settings[Choice];
 
 	/** Space or ↩ picks an option; ← and → move along the choice. */
@@ -57,6 +58,7 @@
 		['board', 'Board'],
 		['appearance', 'Appearance'],
 		['shortcuts', 'Shortcuts'],
+		['models', 'Models'],
 		['advanced', 'Advanced']
 	];
 	let tab = $derived(TABS.some(([k]) => k === settings.tab) ? settings.tab : 'general');
@@ -64,6 +66,11 @@
 		const at = TABS.findIndex(([k]) => k === tab);
 		update({ tab: TABS[(at + step + TABS.length) % TABS.length][0] });
 	}
+
+	/** The agents on PATH, as choices; one chosen before its command went away stays listed. */
+	const found = installed();
+	const agents_for = (key: 'chat_agent' | 'whiteboard_agent'): [Settings['chat_agent'], string][] =>
+		AGENTS.filter((a) => found.includes(a.key) || settings[key] === a.key).map((a) => [a.key, a.label]);
 
 	/** A sort choice per lane, as #1's button in the lane header sets it. */
 	const sort_of = (key: string) => settings.lane_sort[key] ?? 'desc';
@@ -234,6 +241,27 @@
 					{@render toggle('single_keys')}
 				</div>
 				<div class="list"><ShortcutList /></div>
+			{:else if tab === 'models'}
+				{#each [['chat', 'Chat', 'Who answers. A chat keeps the one it started with.'], ['whiteboard', 'Whiteboard drafts', 'Who writes an empty Whiteboard. Agents read the code.']] as [key, title, hint] (key)}
+					{@const which = key === 'chat' ? 'chat_agent' : 'whiteboard_agent'}
+					{@const model = key === 'chat' ? 'chat_model' : 'whiteboard_model'}
+					<div class="row">
+						{@render row(title, hint)}
+						{@render choice(which, agents_for(which))}
+					</div>
+					{#if settings[which] !== 'fm'}
+						<div class="row">
+							{@render row('Model', `Empty uses ${agent(settings[which]).title}’s default; for example ${agent(settings[which]).models}.`)}
+							<input
+								class="field"
+								value={settings[model]}
+								placeholder="default"
+								testId="{key}-model"
+								onchange={(e: GpuixEvent) => update({ [model]: e.value ?? '' })}
+							/>
+						</div>
+					{/if}
+				{/each}
 			{:else}
 				<div class="row">
 					{@render row('Pages fetched at once', 'More loads a big inbox faster, with more API calls at the same time.')}
@@ -262,6 +290,16 @@
 						placeholder="gh"
 						testId="gh-path"
 						onchange={(e: GpuixEvent) => update({ gh_path: e.value ?? '' })}
+					/>
+				</div>
+				<div class="row">
+					{@render row('Code folders', 'Where your clones are, split by commas: Open in Whiteboard looks one and two levels down.')}
+					<input
+						class="field"
+						value={settings.code_dirs}
+						placeholder="~/Code"
+						testId="code-dirs"
+						onchange={(e: GpuixEvent) => update({ code_dirs: e.value ?? '' })}
 					/>
 				</div>
 				<div class="row">
@@ -409,6 +447,8 @@
 		flex-direction: column;
 		flex-grow: 1;
 		flex-basis: 0;
+		/* A long hint wraps rather than push the control out of the dialog. */
+		min-width: 0;
 		gap: 2px;
 	}
 	.label {

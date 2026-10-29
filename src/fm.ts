@@ -15,18 +15,17 @@ export function unavailable(): Promise<string | null> {
 	);
 }
 
-/**
- * One turn of a conversation kept in `transcript` (a file fm reads and writes back); the first turn
- * starts it with `instructions`. The reply streams to `ontext` as it comes, and resolves whole.
- * The prompt goes through stdin, so no text can read as one of fm's options.
- */
-export function respond(prompt: string, transcript: string, instructions: string, ontext: (text: string) => void): Promise<string> {
-	const start = existsSync(transcript) ? ['--resume', transcript] : ['--instructions', instructions];
+/** Runs `fm respond` with `args`; the prompt goes through stdin, so no text can read as one of fm's
+ * options. The reply streams to `ontext` as it comes, and resolves whole. */
+function run(args: string[], prompt: string, ontext?: (text: string) => void): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const child = spawn('fm', ['respond', ...start, '--save-transcript', transcript]);
+		const child = spawn('fm', ['respond', ...args]);
 		let out = '';
 		let err = '';
-		child.stdout.on('data', (d) => ontext((out += d)));
+		child.stdout.on('data', (d) => {
+			out += d;
+			ontext?.(out);
+		});
 		child.stderr.on('data', (d) => (err += d));
 		child.on('error', reject);
 		// fm prints "Transcript saved to: …" on stderr even when it works.
@@ -34,3 +33,15 @@ export function respond(prompt: string, transcript: string, instructions: string
 		child.stdin.end(prompt);
 	});
 }
+
+/** One turn of a conversation kept in `transcript` (a file fm reads and writes back); the first turn
+ * starts it with `instructions`. */
+export function respond(prompt: string, transcript: string, instructions: string, ontext: (text: string) => void): Promise<string> {
+	const start = existsSync(transcript) ? ['--resume', transcript] : ['--instructions', instructions];
+	return run([...start, '--save-transcript', transcript], prompt, ontext);
+}
+
+/** One question with no conversation, for a Whiteboard's summaries (#22). They rework text the user
+ * gave the model (a diff, a PR's description), which fm's permissive guardrails are for. */
+export const once = (prompt: string, instructions: string) =>
+	run(['--instructions', instructions, '--guardrails', 'permissive-content-transformations'], prompt);

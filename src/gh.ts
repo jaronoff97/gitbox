@@ -1,14 +1,18 @@
 // Every GitHub call goes through the local `gh` CLI, so the app holds no token of its own.
 import { execFile, spawn } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { settings } from './settings.svelte.ts';
 
 const exec = promisify(execFile);
 
 // An app started from Finder or the Dock gets launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin), which
-// misses where Homebrew and Linuxbrew put gh. Appended, so a gh earlier on a real PATH still wins.
-const EXTRA_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin'];
-const env = () => ({
+// misses where Homebrew and Linuxbrew put gh, and ~/.local/bin, where the Whiteboard app puts its CLI
+// (#22). Appended, so a gh earlier on a real PATH still wins.
+const EXTRA_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin', join(homedir(), '.local/bin')];
+/** The environment for the tools gitbox runs: gh, git and whiteboard. */
+export const env = () => ({
 	...process.env,
 	PATH: [process.env.PATH, ...EXTRA_PATH].filter(Boolean).join(':'),
 	// Settings → Advanced (#8): a GitHub Enterprise host.
@@ -203,7 +207,7 @@ function pipe(cmd: string, args: string[], input: string): Promise<string> {
 }
 
 /** What a card's context menu can do. */
-export type Action = 'open' | 'copy' | 'read' | 'done' | 'unsubscribe' | 'close' | 'close-not-planned' | 'reopen' | 'comment';
+export type Action = 'open' | 'copy' | 'whiteboard' | 'read' | 'done' | 'unsubscribe' | 'close' | 'close-not-planned' | 'reopen' | 'comment';
 
 /** The PR's or issue's number, from its URL. */
 export const number = (n: Notification) => n.subject.url?.match(/\/(\d+)$/)?.[1] ?? '';
