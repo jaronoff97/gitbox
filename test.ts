@@ -164,6 +164,8 @@ check('finishing onboarding saves it', saved().onboarded === true);
 const badges = (b: string) => all_text().filter((t) => t === b).length;
 await wait_for(() => badges('50+') === 4, { label: 'the first 50 cards of every lane' });
 await wait_for(() => !text().includes('loading…'), { label: 'the start settles' });
+check('a card shows its PR’s number after the repository', has('#4') && has('#1'));
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-cards.png'));
 check('the board has the four lanes', ['Todo', 'Requested', 'Waiting on me', 'Merged / Closed'].every(has));
 check(
 	'each card goes in the lane for its reason and state',
@@ -983,4 +985,4 @@ check(
 	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 128);
+finish('gitbox', 129);
