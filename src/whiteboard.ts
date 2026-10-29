@@ -6,6 +6,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
+import { agent, ask, installed, type Agent } from './agents.ts';
 import { once, unavailable } from './fm.ts';
 import { env, gh, web_url, type Notification } from './gh.ts';
 import { track } from './jobs.svelte.ts';
@@ -209,13 +210,40 @@ export function draft(sessionId: string, url: string, title: string, onstart: ()
 export async function open_pr(n: Notification): Promise<{ text: string; drafting?: Promise<string> }> {
 	const opened = await open_board(n);
 	if (!opened.empty) return { text: opened.text };
+	// Settings → Models: Apple's model drafts from the diff; an agent reads the code and writes the board.
+	const who = settings.whiteboard_agent;
+	if (who !== 'fm') {
+		if (!installed().includes(who)) return { text: `${opened.text}. It stays empty: ${agent(who).command} was not found on PATH.` };
+		return { text: opened.text, drafting: agent_draft(who, opened, n.subject.title) };
+	}
 	const why = await unavailable();
 	if (why) return { text: `${opened.text}. It stays empty: Apple’s on-device model isn’t available (${why}).` };
 	return { text: opened.text, drafting: draft(opened.sessionId, opened.url, n.subject.title, () => {}) };
 }
 
+/** Has Claude Code or Codex write the PR's board, in its checkout, through the Whiteboard MCP server
+ * that Whiteboard connects to them. The popup shows the tool it calls. */
+function agent_draft(who: Agent, board: { sessionId: string; url: string; path: string }, title: string): Promise<string> {
+	const name = agent(who).title;
+	return track(`${name} is writing the Whiteboard`, async (job) => {
+		job.detail = 'Starting';
+		const prompt =
+			`Use Whiteboard to explain the pull request ${board.url} to its reviewer. Its board exists and is empty: ` +
+			`write into session ${board.sessionId} and don't create another. The PR is fetched into this checkout ` +
+			`(${board.path}); session_get gives the board's pins. Call session_get_instructions first and follow them.`;
+		await ask(who, prompt, {
+			instructions: 'You write Whiteboard reviews of pull requests with the whiteboard MCP tools.',
+			model: settings.whiteboard_model,
+			mode: 'whiteboard',
+			cwd: board.path,
+			onstep: (step) => (job.detail = step.slice(0, 80))
+		});
+		return `${name} wrote the Whiteboard for ${title}`;
+	});
+}
+
 /** Opens PR `n`'s board; reports whether it has no content yet. */
-function open_board(n: Notification): Promise<{ text: string; sessionId: string; url: string; empty: boolean }> {
+function open_board(n: Notification): Promise<{ text: string; sessionId: string; url: string; path: string; empty: boolean }> {
 	const url = web_url(n.subject.url);
 	if (!url || n.subject.type !== 'PullRequest') return Promise.reject(new Error('Only a pull request opens in Whiteboard'));
 	const repo = n.repository.full_name;
@@ -239,6 +267,7 @@ function open_board(n: Notification): Promise<{ text: string; sessionId: string;
 			text: board.created ? 'Made a Whiteboard for the pull request' : 'Opened the pull request’s Whiteboard',
 			sessionId: board.sessionId,
 			url,
+			path,
 			empty: Object.keys(blocks).length === 0
 		};
 	});

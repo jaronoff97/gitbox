@@ -1,10 +1,23 @@
 <script module lang="ts">
 	import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 	import { join } from 'node:path';
+	import type { Agent } from './agents.ts';
 	import { dir } from './store.ts';
 
 	type Message = { role: 'user' | 'model'; text: string; error?: boolean };
-	type Conversation = { id: string; title: string; updated: string; messages: Message[] };
+	type Conversation = {
+		id: string;
+		title: string;
+		updated: string;
+		messages: Message[];
+		/** Who answers it, for good: Settings → Models when it started (older chats are fm's). */
+		agent?: Agent;
+		model?: string;
+		/** Claude's or Codex's session, which the next turn resumes; fm's is the transcript file. */
+		session?: string;
+		/** Its first turn's instructions, so every turn has the same context. */
+		instructions?: string;
+	};
 
 	// Each conversation is two files in ~/.config/gitbox/chats: <id>.json (what the tab shows) and
 	// <id>.fm.json (fm's transcript, which a later turn resumes, after a restart too).
@@ -42,7 +55,9 @@
 <script lang="ts">
 	import Scroller from 'gpuix-svelte/components/Scroller.svelte';
 	import type { GpuixEvent } from 'gpuix-svelte';
-	import { respond, unavailable } from './fm.ts';
+	import { agent, ask, installed } from './agents.ts';
+	import { unavailable } from './fm.ts';
+	import { settings } from './settings.svelte.ts';
 	import { words } from './filters.ts';
 	import * as gh from './gh.ts';
 	import { ago } from './ago.ts';
@@ -51,9 +66,18 @@
 	load();
 	const current = $derived(chat.list.find((c) => c.id === chat.id));
 
-	/** Null once fm answers that the model is ready; until then, or when it isn't, why. */
-	let problem = $state<string | null>('Checking for Apple’s on-device model…');
-	unavailable().then((p) => (problem = p));
+	/** Who answers the open chat, or a new one. */
+	const who = $derived(current?.agent ?? settings.chat_agent);
+	const model = $derived(current ? current.model : settings.chat_model);
+
+	/** Null once the agent is ready: fm says its model is, or the CLI is on PATH; else why not. */
+	let problem = $state<string | null>(null);
+	$effect(() => {
+		const w = who;
+		if (w !== 'fm') return void (problem = installed().includes(w) ? null : `${agent(w).command} was not found on PATH.`);
+		problem = 'Checking for Apple’s on-device model…';
+		unavailable().then((p) => who === w && (problem = p));
+	});
 
 	/** The first turn's instructions: who the user is and their newest unread notifications, so a
 	 * question about them has an answer. The model's context is about 4,000 tokens, hence 20.
@@ -84,7 +108,14 @@
 		chat.draft = '';
 		chat.busy = true;
 		if (!current) {
-			chat.list.unshift({ id: crypto.randomUUID(), title: prompt.split('\n')[0].slice(0, 80), updated: new Date().toISOString(), messages: [] });
+			chat.list.unshift({
+				id: crypto.randomUUID(),
+				title: prompt.split('\n')[0].slice(0, 80),
+				updated: new Date().toISOString(),
+				messages: [],
+				agent: settings.chat_agent,
+				model: settings.chat_model
+			});
 			chat.id = chat.list[0].id;
 		}
 		const c = current!;
@@ -92,10 +123,19 @@
 		c.messages.push({ role: 'model', text: '' });
 		const reply = c.messages[c.messages.length - 1];
 		try {
-			// A transcript on disk carries the instructions; a turn that failed before writing one starts over.
-			const start = existsSync(transcript(c.id)) ? '' : await instructions();
+			c.instructions ??= await instructions();
 			mkdirSync(chats(), { recursive: true });
-			await respond(prompt, transcript(c.id), start, (text) => (reply.text = text));
+			const by = c.agent ?? 'fm';
+			const { session } = await ask(by, prompt, {
+				instructions: c.instructions,
+				model: c.model,
+				// fm's transcript file starts the conversation when it doesn't exist yet.
+				session: by === 'fm' ? transcript(c.id) : c.session,
+				mode: 'chat',
+				cwd: chats(),
+				ontext: (text) => (reply.text = text)
+			});
+			c.session = session;
 		} catch (e) {
 			reply.text = (e as Error).message;
 			reply.error = true;
@@ -125,7 +165,7 @@
 	<div class="header">
 		<div class="titles">
 			<div class="title">Chat</div>
-			<div class="subtitle">Apple’s on-device model: what you ask stays on this Mac</div>
+			<div class="subtitle">{agent(who).title}{model ? ` (${model})` : ''}: {agent(who).where}</div>
 		</div>
 		<div class="grow"></div>
 		{#if current}
@@ -155,7 +195,9 @@
 		<div class="main">
 			{#if problem}
 				<div class="empty">
-					<div class="label">Chat needs macOS 27 or later, with Apple Intelligence on.</div>
+					<div class="label">
+				{who === 'fm' ? 'Chat needs macOS 27 or later, with Apple Intelligence on.' : 'Pick another agent in Settings → Models, or install this one.'}
+			</div>
 					<div class="hint" testId="chat-problem">{problem}</div>
 				</div>
 			{:else}

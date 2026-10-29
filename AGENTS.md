@@ -148,6 +148,14 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   `<markdown>`. The chats are module state, so they outlive a switch of tabs. The model only talks
   for now. `once` asks one question with no conversation (the Whiteboard draft). The test puts a
   fake `fm` beside the fake `gh`.
+- `src/agents.ts` — who answers, picked in Settings → Models for Chat and for Whiteboard drafts,
+  with an optional model: Apple's `fm`, Claude Code (`claude -p`, stream-json) or Codex
+  (`codex exec --json`), whichever are on PATH. `ask()` is one turn and returns the session that
+  continues it (fm's is the transcript file). A chat runs Claude with `--safe-mode`, no tools and the
+  instructions as the system prompt; Codex gets them in its first prompt, read-only. A Whiteboard
+  draft runs the agent in the PR's checkout with `--permission-mode dontAsk` and only Whiteboard's
+  MCP tools, file reads, `git diff/log/show` and `gh pr view/diff`. A chat keeps the agent and
+  model it started with. The test has fake `claude` and `codex` CLIs.
 - `src/ago.ts` — "now", "5m", "3h", "2d", then a date: cards, automation activity and chats.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
@@ -204,7 +212,7 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   issue, the advisory (found by its title, as advisory notifications carry no URL), or the page
   the subject's API object names.
 - `src/Settings.svelte` — the settings dialog in tabs (#8): General, Board (cards per lane; lanes
-  shown, ordered and sorted), Appearance, Shortcuts (`ShortcutList.svelte`, as ⌘/ shows) and Advanced
+  shown, ordered and sorted), Appearance, Shortcuts (`ShortcutList.svelte`, as ⌘/ shows), Models (`src/agents.ts`) and Advanced
   (pages at once, `gh_host` → GH_HOST, `gh_path`, code folders, setup, reset). It opens on the last tab; ⌘[ ⌘]
   change tabs.
 - `src/theme.ts` — the palettes (Catppuccin Mocha dark, Latte light) and the board's text size and

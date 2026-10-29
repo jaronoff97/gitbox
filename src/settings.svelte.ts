@@ -1,4 +1,5 @@
 // The user's settings: reactive, saved to state.json on every change, and kept across hot reloads.
+import type { Agent } from './agents.ts';
 import type { Filter } from './filters.ts';
 import { load, save } from './store.ts';
 
@@ -30,6 +31,12 @@ export type Settings = {
 	gh_host: string;
 	/** Where gh is; empty finds it on PATH. */
 	gh_path: string;
+	/** Who answers in Chat, and with which model (empty is the agent's default). */
+	chat_agent: Agent;
+	chat_model: string;
+	/** Who drafts an empty Whiteboard, and with which model. */
+	whiteboard_agent: Agent;
+	whiteboard_model: string;
 	/** Folders, split by commas, whose repositories (one or two levels down) Whiteboard can open PRs in (#22). */
 	code_dirs: string;
 	/** The settings tab last open. */
@@ -58,6 +65,10 @@ export const DEFAULTS: Settings = {
 	single_keys: true,
 	gh_host: '',
 	gh_path: '',
+	chat_agent: 'fm',
+	chat_model: '',
+	whiteboard_agent: 'fm',
+	whiteboard_model: '',
 	code_dirs: '~/Code',
 	tab: 'general'
 };

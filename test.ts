@@ -1,6 +1,6 @@
 import { all_text, bounds, check, click, click_test_id, drag, find_all, find_test_id, finish, hover, mount_headless, press, pump, screenshot, type, wait, wait_for, wheel } from 'gpuix-svelte/test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import App from './App.svelte';
@@ -146,22 +146,65 @@ if (args[0] === 'app' && args[1] === 'launch') {
 	if (!fs.existsSync(up)) { console.error('Whiteboard stable is not running. Start it with whiteboard app launch.'); process.exit(1); }
 	if (args[1] === 'session_list') console.log('[]');
 	else if (args[1] === 'session_create') {
-		const again = fs.existsSync(up + '-made');
-		fs.writeFileSync(up + '-made', '');
-		console.log(JSON.stringify({ created: !again, sessionId: 's-1', opened: !again }));
+		// One board per PR: s-<number>.
+		const id = 's-' + JSON.parse(args[2]).target.pullRequest.split('/').pop();
+		const again = fs.existsSync(up + '-made-' + id);
+		fs.writeFileSync(up + '-made-' + id, '');
+		console.log(JSON.stringify({ created: !again, sessionId: id, opened: !again }));
 	} else if (args[1] === 'session_open') console.log('{}');
 	// A board is empty until its first edit.
-	else if (args[1] === 'session_get') console.log(fs.existsSync(up + '-edits') ? '{"0":{"id":"block-1"}}' : '{}');
+	else if (args[1] === 'session_get') console.log(fs.existsSync(up + '-edits-' + JSON.parse(args[2]).sessionId) ? '{"0":{"id":"block-1"}}' : '{}');
 	else if (args[1] === 'session_activity_begin') console.log('{"activityId":"a-1"}');
 	else if (args[1] === 'session_activity_end') console.log('{}');
 	else if (args[1] === 'session_edit') {
-		const k = (fs.existsSync(up + '-edits') ? +fs.readFileSync(up + '-edits', 'utf8') : 0) + 1;
-		fs.writeFileSync(up + '-edits', String(k));
+		const edits = up + '-edits-' + JSON.parse(args[2]).sessionId;
+		const k = (fs.existsSync(edits) ? +fs.readFileSync(edits, 'utf8') : 0) + 1;
+		fs.writeFileSync(edits, String(k));
 		console.log(JSON.stringify({ targetId: 'block-' + k, children: [{ id: 'block-' + k + '-1', type: 'markdown' }] }));
 	}
 }
 `,
   { mode: 0o755 }
+);
+// Fake agent CLIs (Settings → Models): Claude streams its reply and names its session; Codex names a
+// thread and fails on "fail" as Codex does, with the API's error inside its message. In Whiteboard mode
+// Claude calls a Whiteboard tool. Each call is logged with its arguments, stdin and folder.
+writeFileSync(
+	join(bin, 'claude'),
+	`#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const input = fs.readFileSync(0, 'utf8');
+fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'claude', args, stdin: input, cwd: process.cwd() }) + '\\n');
+const out = (e) => console.log(JSON.stringify({ ...e, session_id: 'claude-1' }));
+if (args.includes('--allowedTools')) {
+	out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__plugin_whiteboard_whiteboard__session_edit' }] } });
+	out({ type: 'result', subtype: 'success', is_error: false, result: 'Done.' });
+} else {
+	const reply = 'Claude says ' + input + (args.includes('--resume') ? ' again' : '');
+	out({ type: 'stream_event', event: { type: 'message_start' } });
+	out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: reply } } });
+	out({ type: 'result', subtype: 'success', is_error: false, result: reply });
+}
+`,
+	{ mode: 0o755 }
+);
+writeFileSync(
+	join(bin, 'codex'),
+	`#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+const input = fs.readFileSync(0, 'utf8');
+fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'codex', args, stdin: input, cwd: process.cwd() }) + '\\n');
+const out = (e) => console.log(JSON.stringify(e));
+if (args[1] !== 'resume') out({ type: 'thread.started', thread_id: 'codex-1' });
+if (input === 'fail') {
+	out({ type: 'turn.failed', error: { message: JSON.stringify({ type: 'error', status: 400, error: { message: "The 'x' model is not supported." } }) } });
+	process.exit(1);
+}
+out({ type: 'item.completed', item: { type: 'agent_message', text: 'Codex says ' + input.split('\\n').pop() } });
+`,
+	{ mode: 0o755 }
 );
 process.env.FAKE_LOG = join(bin, 'calls.log');
 /** What the fake tools were asked to do, in order. */
@@ -772,8 +815,17 @@ press('cmd-,');
 await wait_for(() => has('Single-key shortcuts'), { label: '⌘, opens on the last tab' });
 click_test_id('toggle-single_keys');
 press('cmd-]');
-await wait_for(() => has('Pages fetched at once'), { label: '⌘] goes to Advanced' });
+await wait_for(() => has('Whiteboard drafts'), { label: '⌘] goes to Models' });
 check('the dialog remembers its tab, and ⌘] moves on', saved().settings.single_keys === true);
+// Models: the agents found on PATH (here fm, claude and codex, all fakes); an agent's model is a field.
+check('Models offers the agents on PATH', badges('Apple') === 2 && badges('Claude') === 2 && badges('Codex') === 2 && !find_test_id('chat-model'));
+click_test_id('chat_agent-claude');
+pump();
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-models.png'));
+check('an agent gets a model field, and the choice is saved', !!find_test_id('chat-model') && saved().settings.chat_agent === 'claude');
+click_test_id('chat_agent-fm');
+press('cmd-]');
+await wait_for(() => has('Pages fetched at once'), { label: '⌘] goes to Advanced' });
 
 // The dialog by keyboard: its first control (a tab) has the focus; ← and → change tabs, and on a
 // choice they change the option.
@@ -784,8 +836,8 @@ await wait_for(dialog_open, { label: '⌘, opens settings' });
 // The dialog takes the focus a tick after it mounts, when its controls exist natively.
 await wait(100);
 press('left');
-await wait_for(() => has('Single-key shortcuts'), { label: '← on the tabs' });
-check('← and → on the tabs change the tab', has('Single-key shortcuts'));
+await wait_for(() => has('Whiteboard drafts'), { label: '← on the tabs' });
+check('← and → on the tabs change the tab', has('Whiteboard drafts'));
 click_test_id('tab-board');
 await wait_for(() => has('Cards per lane'), { label: 'the Board tab again' });
 click_test_id('lane_size-25');
@@ -1013,6 +1065,51 @@ press('ctrl-3');
 await wait_for(() => has('Apple Intelligence is not enabled'), { label: 'no model' });
 check('without the model, Chat says why', has('Chat needs macOS 27 or later, with Apple Intelligence on.'));
 delete process.env.FAKE_NO_FM;
+
+// Settings → Models: a new chat goes to Claude Code with its model and the chat's instructions as the
+// system prompt, and no tools; its next turn resumes Claude's session. A Codex chat gets the
+// instructions in its first prompt, resumes its thread, and shows the API's error from inside
+// Codex's message. A chat keeps the agent it started with.
+const agent_calls = (cmd: string) => calls().filter((c) => c.cmd === cmd) as unknown as { args: string[]; stdin: string; cwd: string }[];
+const say = async (keys: string, reply: string) => {
+  click_test_id('chat-input');
+  type(keys);
+  press('enter');
+  await wait_for(() => replies().includes(reply), { label: reply });
+  await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+};
+update({ chat_agent: 'claude', chat_model: 'haiku' });
+// The chat open here was deleted above, so it is a new one already.
+if (find_test_id('chat-new')) click_test_id('chat-new');
+await wait_for(() => !!find_test_id('chat-input'), { label: 'a Claude chat' });
+check('the header names the agent, its model and where the words go', has('Claude Code (haiku): what you ask goes to Anthropic'));
+await say('h e l l o', 'Claude says hello');
+const first_claude = agent_calls('claude')[0].args;
+check(
+  'a Claude chat has its model, no tools, and the instructions as its system prompt',
+  first_claude.includes('--safe-mode') && first_claude[first_claude.indexOf('--model') + 1] === 'haiku' &&
+  first_claude[first_claude.indexOf('--tools') + 1] === '' && first_claude[first_claude.indexOf('--system-prompt') + 1].includes('The user is octocat')
+);
+await say('m o r e', 'Claude says more again');
+check('its next turn resumes Claude’s session', agent_calls('claude')[1].args.join(' ').includes('--resume claude-1'));
+const claude_chat = saved_chats().find((c) => c.title === 'hello')!;
+update({ chat_agent: 'codex', chat_model: '' });
+click_test_id('chat-new');
+await say('h i', 'Codex says hi');
+check('a Codex chat starts with the instructions in its prompt', agent_calls('codex')[0].stdin.startsWith('You are the assistant in Gitbox'));
+await say('a g a i n', 'Codex says again');
+check('and resumes its thread', agent_calls('codex')[1].args.slice(0, 2).join() === 'exec,resume' && agent_calls('codex')[1].args.includes('codex-1'));
+click_test_id('chat-input');
+type('f a i l');
+press('enter');
+await wait_for(() => has("The 'x' model is not supported."), { label: 'a Codex error' });
+check('a Codex error shows its message', has("The 'x' model is not supported."));
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+click_test_id(`chat-${claude_chat.id}`);
+pump();
+await say('b a c k', 'Claude says back again');
+check('a chat keeps the agent it started with', agent_calls('claude').length === 3 && agent_calls('codex').length === 3);
+update({ chat_agent: 'fm', chat_model: '' });
 press('ctrl-1');
 
 // Whiteboard (#22): a PR opens on its board, in a checkout found by its remote under the code folders
@@ -1070,6 +1167,19 @@ check(
   'w on a PR opens its board, which exists now and has content, so nothing drafts it again',
   wb().some((c) => c.cmd === 'whiteboard api session_open') && calls().filter((c) => c.cmd === 'fm once').length === 4
 );
+// With Claude Code chosen for drafts, Claude writes an empty board itself, in the PR's checkout, with
+// Whiteboard's tools and only read-only others; the popup shows the tool it calls.
+update({ whiteboard_agent: 'claude', whiteboard_model: 'sonnet' });
+await right_click(8);
+click_test_id('menu-whiteboard');
+await wait_for(() => has('Claude Code wrote the Whiteboard for Note 8'), { label: 'Claude drafts the board' });
+const drafter = agent_calls('claude').at(-1)!;
+check(
+  'Claude writes the board in the checkout, with Whiteboard’s tools and its model',
+  drafter.cwd === realpathSync(join(code, 'team', 'renamed')) && drafter.stdin.includes('session s-8') &&
+  drafter.args.includes('mcp__plugin_whiteboard_whiteboard') && !drafter.args.includes('Bash') && drafter.args[drafter.args.indexOf('--model') + 1] === 'sonnet'
+);
+update({ whiteboard_agent: 'fm', whiteboard_model: '' });
 // Note 20 is a review request in octo/other, which has no checkout here.
 await right_click(20);
 click_test_id('menu-whiteboard');
@@ -1098,4 +1208,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 137);
+finish('gitbox', 147);
