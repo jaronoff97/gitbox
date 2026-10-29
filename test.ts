@@ -1,16 +1,16 @@
+import { all_text, bounds, check, click, click_test_id, drag, find_all, find_test_id, finish, hover, mount_headless, press, pump, screenshot, type, wait, wait_for, wheel } from 'gpuix-svelte/test';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mount_headless, click, click_test_id, hover, all_text, check, drag, finish, press, pump, type, wait, wait_for, wheel, find_test_id, find_all, bounds, screenshot } from 'gpuix-svelte/test';
 import App from './App.svelte';
+import { automations, check as check_automations, put } from './src/automations.svelte.ts';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
-import { menu_json } from './src/menubar.ts';
-import { palette as colors } from './src/theme.ts';
 import { link, type Notification } from './src/gh.ts';
-import { automations, check as check_automations, put } from './src/automations.svelte.ts';
+import { menu_json } from './src/menubar.ts';
 import { update } from './src/settings.svelte.ts';
-import { execFileSync } from 'node:child_process';
+import { palette as colors } from './src/theme.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
 // pages of 50 (the last has 40), titled "Note 1" to "Note 290". Note i is PR i, and i % 4 picks
@@ -20,8 +20,8 @@ import { execFileSync } from 'node:child_process';
 // note is in octo/other, the rest in octo/repo; every third has the label "bug".
 const bin = mkdtempSync(join(tmpdir(), 'gitbox-'));
 writeFileSync(
-	join(bin, 'gh'),
-	`#!${process.execPath}
+  join(bin, 'gh'),
+  `#!${process.execPath}
 const args = process.argv.slice(2);
 const cmd = args.join(' ');
 const reason = (i) => ['review_requested', 'mention', 'subscribed', 'comment'][i % 4];
@@ -79,23 +79,23 @@ else if (page) {
 	console.log(JSON.stringify({ data }));
 } else { console.error('unexpected: ' + cmd); process.exit(1); }
 `,
-	{ mode: 0o755 }
+  { mode: 0o755 }
 );
 // A fake `open` and `pbcopy` too, so the test opens no browser and leaves the clipboard alone.
 for (const tool of ['open', 'pbcopy'])
-	writeFileSync(
-		join(bin, tool),
-		`#!${process.execPath}
+  writeFileSync(
+    join(bin, tool),
+    `#!${process.execPath}
 const stdin = ${JSON.stringify(tool)} === 'pbcopy' ? require('fs').readFileSync(0, 'utf8') : undefined;
 require('fs').appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: ${JSON.stringify(tool)} + ' ' + process.argv.slice(2).join(' '), stdin }) + '\\n');
 `,
-		{ mode: 0o755 }
-	);
+    { mode: 0o755 }
+  );
 // A fake `fm` (Apple's on-device model, #chat): it echoes the prompt with the turn, which it keeps in
 // the transcript file, and logs the call with its instructions. FAKE_NO_FM makes the model missing.
 writeFileSync(
-	join(bin, 'fm'),
-	`#!${process.execPath}
+  join(bin, 'fm'),
+  `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
 const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
@@ -112,13 +112,13 @@ if (args[0] === 'available') {
 	console.error('Transcript saved to: ' + opt('--save-transcript'));
 }
 `,
-	{ mode: 0o755 }
+  { mode: 0o755 }
 );
 // A fake `whiteboard` CLI (#22): not running until `app launch`; session_create makes the PR's board
 // the first time and returns it after. Every call goes to the log, with its JSON input as stdin.
 writeFileSync(
-	join(bin, 'whiteboard'),
-	`#!${process.execPath}
+  join(bin, 'whiteboard'),
+  `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
 const up = __dirname + '/whiteboard-up';
@@ -136,12 +136,12 @@ if (args[0] === 'app' && args[1] === 'launch') {
 	} else if (args[1] === 'session_open') console.log('{}');
 }
 `,
-	{ mode: 0o755 }
+  { mode: 0o755 }
 );
 process.env.FAKE_LOG = join(bin, 'calls.log');
 /** What the fake tools were asked to do, in order. */
 const calls = (): { cmd: string; stdin?: string; instructions?: string }[] =>
-	existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+  existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
 const called = (cmd: string) => calls().some((c) => c.cmd === cmd);
 const settings_filters = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8')).settings.filters.length;
 process.env.PATH = `${bin}:${process.env.PATH}`;
@@ -155,23 +155,23 @@ const text = () => all_text().join('\n');
 const has = (s: string) => all_text().includes(s);
 /** Whether card `id` sits inside lane `key`, by painted x. */
 const in_lane = (id: number, key: string) => {
-	const c = bounds(find_test_id(`card-${id}`)!);
-	const l = bounds(find_test_id(`lane-${key}`)!);
-	return !!c && !!l && c.x >= l.x && c.x + c.width <= l.x + l.width;
+  const c = bounds(find_test_id(`card-${id}`)!);
+  const l = bounds(find_test_id(`lane-${key}`)!);
+  return !!c && !!l && c.x >= l.x && c.x + c.width <= l.x + l.width;
 };
 
 /** Scrolls a lane down in 1500 px wheels, as a trackpad does: a windowed list knows the heights of
  * its mounted rows only, so one huge jump stops short. Headless, a list draws a wheel scroll, and
  * reports its new visible range, only on a later frame, so each wheel gets a moment and a pump. */
 async function scroll_lane(key: string, steps = 10) {
-	for (let k = 0; k < steps; k++) {
-		wheel(find_test_id(`lane-${key}`)!, 0, -1500);
-		await wait(40);
-		pump();
-	}
-	wheel(find_test_id(`lane-${key}`)!, 0, -1);
-	await wait(60);
-	pump();
+  for (let k = 0; k < steps; k++) {
+    wheel(find_test_id(`lane-${key}`)!, 0, -1500);
+    await wait(40);
+    pump();
+  }
+  wheel(find_test_id(`lane-${key}`)!, 0, -1);
+  await wait(60);
+  pump();
 }
 
 let app = mount_headless(App, { width: 1470, height: 800 });
@@ -190,10 +190,12 @@ check('finishing onboarding saves it', saved().onboarded === true);
 const badges = (b: string) => all_text().filter((t) => t === b).length;
 await wait_for(() => badges('50+') === 4, { label: 'the first 50 cards of every lane' });
 await wait_for(() => !text().includes('loading…'), { label: 'the start settles' });
+check('a card shows its PR’s number after the repository', has('#4') && has('#1'));
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-cards.png'));
 check('the board has the four lanes', ['Todo', 'Requested', 'Waiting on me', 'Merged / Closed'].every(has));
 check(
-	'each card goes in the lane for its reason and state',
-	in_lane(4, 'requested') && in_lane(5, 'waiting') && in_lane(6, 'todo') && in_lane(7, 'done')
+  'each card goes in the lane for its reason and state',
+  in_lane(4, 'requested') && in_lane(5, 'waiting') && in_lane(6, 'todo') && in_lane(7, 'done')
 );
 check('every lane starts with 50 cards', text().includes('200+ unread') && badges('50+') === 4);
 check('a lane mounts a window of rows, not all of them', has('Note 4') && !has('Note 200'));
@@ -216,14 +218,14 @@ check('Todo gets its cards without other lanes', !has('Note 201') && !has('Note 
 
 // The thumb is GPUI's and can't be dragged, so a strip over it scrolls to the row at the pointer.
 {
-	const strip = bounds(find_test_id('gutter-waiting')!)!;
-	const x = strip.x + strip.width / 2;
-	const full = badges('50+');
-	drag({ x, y: strip.y + 5 }, { x, y: strip.y + strip.height - 2 }, { steps: 6 });
-	await wait(60);
-	pump();
-	await wait_for(() => has('73'), { label: 'a drag to the end of Waiting on me' });
-	check('dragging the scroll strip to the end grows that lane only', has('73') && badges('50+') === full - 1);
+  const strip = bounds(find_test_id('gutter-waiting')!)!;
+  const x = strip.x + strip.width / 2;
+  const full = badges('50+');
+  drag({ x, y: strip.y + 5 }, { x, y: strip.y + strip.height - 2 }, { steps: 6 });
+  await wait(60);
+  pump();
+  await wait_for(() => has('73'), { label: 'a drag to the end of Waiting on me' });
+  check('dragging the scroll strip to the end grows that lane only', has('73') && badges('50+') === full - 1);
 }
 
 click_test_id('add-filter');
@@ -254,53 +256,53 @@ await wait_for(() => has('Note 4'), { label: 'the filters cleared' });
 check('Clear removes every filter', has('Note 6') && saved().settings.filters.length === 0);
 
 const sample = {
-	reason: 'mention',
-	subject: { type: 'PullRequest' },
-	repository: { full_name: 'a/b' },
-	labels: [{ name: 'bug', color: '' }],
-	state: 'OPEN',
-	draft: true,
-	reviews: 4
+  reason: 'mention',
+  subject: { type: 'PullRequest' },
+  repository: { full_name: 'a/b' },
+  labels: [{ name: 'bug', color: '' }],
+  state: 'OPEN',
+  draft: true,
+  reviews: 4
 } as unknown as Notification;
 check(
-	'filters match any value of one field and every field',
-	matches(sample, [
-		{ field: 'repo', value: 'x/y' },
-		{ field: 'repo', value: 'a/b' },
-		{ field: 'label', value: 'bug' }
-	]) && !matches(sample, [
-		{ field: 'repo', value: 'a/b' },
-		{ field: 'label', value: 'docs' }
-	])
+  'filters match any value of one field and every field',
+  matches(sample, [
+    { field: 'repo', value: 'x/y' },
+    { field: 'repo', value: 'a/b' },
+    { field: 'label', value: 'bug' }
+  ]) && !matches(sample, [
+    { field: 'repo', value: 'a/b' },
+    { field: 'label', value: 'docs' }
+  ])
 );
 check(
-	'an open draft has the state draft, and 4 reviews count as 3+',
-	matches(sample, [
-		{ field: 'state', value: 'draft' },
-		{ field: 'reviews', value: '3+' }
-	]) && !matches(sample, [{ field: 'state', value: 'open' }])
+  'an open draft has the state draft, and 4 reviews count as 3+',
+  matches(sample, [
+    { field: 'state', value: 'draft' },
+    { field: 'reviews', value: '3+' }
+  ]) && !matches(sample, [{ field: 'state', value: 'open' }])
 );
 
 // Oldest first: Waiting on me holds 1, 5, … 289, so its oldest is Note 289, on the last page.
 click_test_id('sort-waiting');
 await wait_for(() => has('Note 289'), { label: 'Waiting on me, oldest first' });
 check(
-	'oldest first puts the oldest card of the lane at its top',
-	bounds(find_test_id('card-289')!)!.y < bounds(find_test_id('card-285')!)!.y && !has('Note 1')
+  'oldest first puts the oldest card of the lane at its top',
+  bounds(find_test_id('card-289')!)!.y < bounds(find_test_id('card-285')!)!.y && !has('Note 1')
 );
 check('a sort changes only its own lane', has('Note 2') && has('Note 4'));
 check('the sort is saved', saved().settings.lane_sort.waiting === 'asc');
 
 // Card actions (#2): a right click opens the menu at the card.
 const right_click = async (id: number) => {
-	click_test_id(`card-${id}`, { button: 2 });
-	await wait_for(() => has('Mark as Done'), { label: `the menu of card ${id}` });
+  click_test_id(`card-${id}`, { button: 2 });
+  await wait_for(() => has('Mark as Done'), { label: `the menu of card ${id}` });
 };
 await right_click(4);
 check(
-	'the menu of an open PR offers its actions',
-	['Open in Browser', 'Copy Link', 'Mark as Read', 'Mark as Done', 'Unsubscribe', 'Comment…', 'Close pull request…'].every(has) &&
-		!has('Reopen pull request')
+  'the menu of an open PR offers its actions',
+  ['Open in Browser', 'Copy Link', 'Mark as Read', 'Mark as Done', 'Unsubscribe', 'Comment…', 'Close pull request…'].every(has) &&
+  !has('Reopen pull request')
 );
 click_test_id('menu-open');
 await wait_for(() => called('open https://github.com/octo/repo/pull/4'), { label: 'open in the browser' });
@@ -365,8 +367,8 @@ press('cmd-enter');
 await wait_for(() => called('pr comment https://github.com/octo/repo/pull/4 --body-file -'), { label: 'comment' });
 check('⌘↩ in the comment field sends, and opens nothing', calls().filter((c) => c.cmd.startsWith('open ')).length === opens);
 check(
-	'a comment reaches gh unchanged, through stdin',
-	calls().find((c) => c.cmd.startsWith('pr comment'))?.stdin === "hi 'a'\nb"
+  'a comment reaches gh unchanged, through stdin',
+  calls().find((c) => c.cmd.startsWith('pr comment'))?.stdin === "hi 'a'\nb"
 );
 await wait_for(() => !has('Comment on octo/repo #4'), { label: 'the dialog closes after sending' });
 press('cmd-enter');
@@ -389,9 +391,9 @@ check('selecting opens nothing', opened() === before_select);
 await scroll_lane('requested', 3);
 check('a selection keeps cards that scroll out of view', has('4 selected') && !find_test_id('card-4'));
 for (let k = 0; k < 6; k++) {
-	wheel(find_test_id('lane-requested')!, 0, 2000);
-	await wait(40);
-	pump();
+  wheel(find_test_id('lane-requested')!, 0, 2000);
+  await wait(40);
+  pump();
 }
 await wait_for(() => find_test_id('card-4') !== null, { label: 'back at the top of Requested' });
 
@@ -401,12 +403,12 @@ await wait_for(() => has('Mark 4 as Done'), { label: 'the menu for the selection
 click_test_id('menu-done');
 await wait_for(() => text().includes('1 of 4 failed: HTTP 403: Forbidden'), { label: 'a bulk done with one failure' });
 check(
-	'a bulk action calls gh once for each card',
-	[6, 4, 12, 28].every((id) => called(`api -X DELETE notifications/threads/${id}`))
+  'a bulk action calls gh once for each card',
+  [6, 4, 12, 28].every((id) => called(`api -X DELETE notifications/threads/${id}`))
 );
 check(
-	'only the card whose call failed comes back, and stays selected',
-	!find_test_id('card-6') && !find_test_id('card-4') && !find_test_id('card-28') && find_test_id('card-12') !== null && has('1 selected')
+  'only the card whose call failed comes back, and stays selected',
+  !find_test_id('card-6') && !find_test_id('card-4') && !find_test_id('card-28') && find_test_id('card-12') !== null && has('1 selected')
 );
 press('escape');
 await wait_for(() => !has('1 selected'), { label: 'Escape clears the selection' });
@@ -438,8 +440,8 @@ await wait_for(() => has('2 selected'), { label: 'two todo cards' });
 click_test_id('bulk-copy');
 await wait_for(() => text().includes('Copied 2 links'), { label: 'copy links' });
 check(
-	'Copy Links puts every link on the clipboard, one a line',
-	calls().some((c) => c.cmd === 'pbcopy ' && c.stdin === 'https://github.com/octo/repo/pull/10\nhttps://github.com/octo/repo/pull/14')
+  'Copy Links puts every link on the clipboard, one a line',
+  calls().some((c) => c.cmd === 'pbcopy ' && c.stdin === 'https://github.com/octo/repo/pull/10\nhttps://github.com/octo/repo/pull/14')
 );
 click_test_id('bulk-clear');
 
@@ -488,8 +490,8 @@ await wait_for(() => has('Requested'), { label: '⌘2 shows it again' });
 press('cmd-/');
 await wait_for(() => has('Keyboard Shortcuts'), { label: '⌘/' });
 check(
-	'⌘/ lists the shortcuts, with their keys',
-	['Refresh', 'Settings…', 'Select All Cards', 'Show Requested', 'Clear Selection'].every(has) && has('⌘') && has('R')
+  '⌘/ lists the shortcuts, with their keys',
+  ['Refresh', 'Settings…', 'Select All Cards', 'Show Requested', 'Clear Selection'].every(has) && has('⌘') && has('R')
 );
 press('escape');
 await wait_for(() => !has('Keyboard Shortcuts'), { label: 'Escape closes the shortcuts' });
@@ -585,17 +587,17 @@ press('escape');
 
 // The ⌘K palette (#6): commands from the registry, filters, lanes and notifications.
 check(
-	'the fuzzy match: in order, word starts and runs first',
-	score('xyz', 'Refresh') === null &&
-		score('sc', 'Show Commands')! > score('sc', 'Disconnect')! &&
-		score('ref', 'Refresh')! > score('ref', 'Rename Filter')!
+  'the fuzzy match: in order, word starts and runs first',
+  score('xyz', 'Refresh') === null &&
+  score('sc', 'Show Commands')! > score('sc', 'Disconnect')! &&
+  score('ref', 'Refresh')! > score('ref', 'Rename Filter')!
 );
 const palette = async (keys: string) => {
-	press('cmd-k');
-	await wait_for(() => find_test_id('palette') !== null, { label: '⌘K' });
-	await wait(50);
-	if (keys) type(keys);
-	await wait(50);
+  press('cmd-k');
+  await wait_for(() => find_test_id('palette') !== null, { label: '⌘K' });
+  await wait(50);
+  if (keys) type(keys);
+  await wait(50);
 };
 const loads_6 = loads();
 await palette('r e f r');
@@ -655,27 +657,27 @@ check('arrows in the palette leave the board alone', calls().filter((c) => c.cmd
 // The menu bar (#7) comes from the registry: menus in the macOS order, ⌘ keys as key equivalents,
 // single keys and the ones a text field needs (⌘A, ⌘↩) as hints only, toggles with their check.
 {
-	const menus = menu_json();
-	const find = (menu: string, title: string) => menus.find((m) => m.title === menu)?.items.find((i) => i.title === title);
-	check(
-		'the menu bar has the Mac menus in order',
-		menus.map((m) => m.title).join(',') === 'Gitbox,File,Edit,View,Go,Notification,Window,Help'
-	);
-	check(
-		'⌘ shortcuts are key equivalents; single keys and ⌘A are hints',
-		find('File', 'Refresh')?.keys === 'cmd-r' &&
-			find('Go', 'Next Card')?.hint === 'J' &&
-			!find('Go', 'Next Card')?.keys &&
-			find('Edit', 'Select All Cards')?.hint === '⌘A' &&
-			!find('Edit', 'Select All Cards')?.keys
-	);
-	check(
-		'toggles carry their state, and the standard items their roles',
-		find('View', 'Show Todo')?.checked === true &&
-			find('Gitbox', 'Quit Gitbox')?.role === 'quit' &&
-			find('Edit', 'Copy')?.role === 'copy' &&
-			!find('Edit', 'Copy')?.keys
-	);
+  const menus = menu_json();
+  const find = (menu: string, title: string) => menus.find((m) => m.title === menu)?.items.find((i) => i.title === title);
+  check(
+    'the menu bar has the Mac menus in order',
+    menus.map((m) => m.title).join(',') === 'Gitbox,File,Edit,View,Go,Notification,Window,Help'
+  );
+  check(
+    '⌘ shortcuts are key equivalents; single keys and ⌘A are hints',
+    find('File', 'Refresh')?.keys === 'cmd-r' &&
+    find('Go', 'Next Card')?.hint === 'J' &&
+    !find('Go', 'Next Card')?.keys &&
+    find('Edit', 'Select All Cards')?.hint === '⌘A' &&
+    !find('Edit', 'Select All Cards')?.keys
+  );
+  check(
+    'toggles carry their state, and the standard items their roles',
+    find('View', 'Show Todo')?.checked === true &&
+    find('Gitbox', 'Quit Gitbox')?.role === 'quit' &&
+    find('Edit', 'Copy')?.role === 'copy' &&
+    !find('Edit', 'Copy')?.keys
+  );
 }
 
 const dialog_open = () => find_test_id('settings-dialog') !== null;
@@ -701,8 +703,8 @@ const x = (key: string) => bounds(find_test_id(`lane-${key}`)!)!.x;
 click_test_id('lane-up-waiting');
 await wait_for(() => x('waiting') < x('requested'), { label: 'Waiting on me moves left' });
 check(
-	'↑ moves a lane earlier on the board, and the order is saved',
-	saved().settings.lanes.map((l: { key: string }) => l.key).join(',') === 'todo,waiting,requested,done'
+  '↑ moves a lane earlier on the board, and the order is saved',
+  saved().settings.lanes.map((l: { key: string }) => l.key).join(',') === 'todo,waiting,requested,done'
 );
 click_test_id('lane-down-waiting');
 await wait_for(() => x('waiting') > x('requested'), { label: 'and back' });
@@ -862,15 +864,15 @@ click_test_id('automation-save');
 pump();
 const made = automations_json()[0];
 check(
-	'a new automation is saved with its conditions and steps',
-	made?.name === 'bob' &&
-		JSON.stringify(made.when) ===
-			JSON.stringify([
-				{ field: 'reason', value: 'review requested' },
-				{ field: 'author', value: 'bob' },
-				{ field: 'org', value: 'Octo' }
-			]) &&
-		made.then.join() === 'approve,done'
+  'a new automation is saved with its conditions and steps',
+  made?.name === 'bob' &&
+  JSON.stringify(made.when) ===
+  JSON.stringify([
+    { field: 'reason', value: 'review requested' },
+    { field: 'author', value: 'bob' },
+    { field: 'org', value: 'Octo' }
+  ]) &&
+  made.then.join() === 'approve,done'
 );
 check('the list describes it', has('When reason is review requested and author is bob and organization is Octo, approve the pull request, then mark as done.'));
 
@@ -918,7 +920,7 @@ press('ctrl-1');
 const turns = () => calls().filter((c) => c.cmd === 'fm respond');
 /** The model's replies: markdown, which GPUI keeps as source rather than text. */
 const replies = () =>
-	find_all((n) => n.testId === 'chat-reply').map((n) => (n as { customProps?: { source?: string } }).customProps?.source);
+  find_all((n) => n.testId === 'chat-reply').map((n) => (n as { customProps?: { source?: string } }).customProps?.source);
 press('ctrl-3');
 await wait_for(() => !!find_test_id('chat-input'), { label: 'the model is ready' });
 click_test_id('chat-input');
@@ -927,8 +929,8 @@ press('enter');
 await wait_for(() => replies().includes('You said hi, turn 1'), { label: 'the first reply' });
 await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
 check(
-	'the first turn sends the prompt, with the notifications as instructions',
-	turns()[0].stdin === 'hi' && !!turns()[0].instructions?.includes('The user is octocat') && !!turns()[0].instructions?.includes('"Note 1"')
+  'the first turn sends the prompt, with the notifications as instructions',
+  turns()[0].stdin === 'hi' && !!turns()[0].instructions?.includes('The user is octocat') && !!turns()[0].instructions?.includes('"Note 1"')
 );
 type('a g a i n');
 press('enter');
@@ -959,9 +961,9 @@ await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
 // messages and resumes its transcript, and Delete removes both files.
 const chats_dir = join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'chats');
 const saved_chats = () =>
-	readdirSync(chats_dir)
-		.filter((f) => !f.endsWith('.fm.json'))
-		.map((f) => JSON.parse(readFileSync(join(chats_dir, f), 'utf8')) as { id: string; title: string; messages: unknown[] });
+  readdirSync(chats_dir)
+    .filter((f) => !f.endsWith('.fm.json'))
+    .map((f) => JSON.parse(readFileSync(join(chats_dir, f), 'utf8')) as { id: string; title: string; messages: unknown[] });
 const first_chat = saved_chats().find((c) => c.title === 'hi')!;
 check('both chats are saved, with their messages', saved_chats().length === 2 && first_chat.messages.length === 6);
 check('the list holds both, by their first message', has('hi') && has('new'));
@@ -977,8 +979,8 @@ check('a past chat resumes its transcript', turns()[4].instructions === undefine
 click_test_id(`chat-delete-${first_chat.id}`);
 pump();
 check(
-	'Delete removes a chat and its transcript',
-	saved_chats().length === 1 && !existsSync(join(chats_dir, `${first_chat.id}.fm.json`)) && !has('again')
+  'Delete removes a chat and its transcript',
+  saved_chats().length === 1 && !existsSync(join(chats_dir, `${first_chat.id}.fm.json`)) && !has('again')
 );
 process.env.FAKE_NO_FM = '1';
 press('ctrl-1');
@@ -993,8 +995,8 @@ press('ctrl-1');
 // elsewhere). The first call starts Whiteboard; the second opens the board that exists.
 const code = mkdtempSync(join(tmpdir(), 'gitbox-code-'));
 const git_repo = (path: string, remote: string) => {
-	execFileSync('git', ['init', '-q', path]);
-	execFileSync('git', ['-C', path, 'remote', 'add', 'origin', remote]);
+  execFileSync('git', ['init', '-q', path]);
+  execFileSync('git', ['-C', path, 'remote', 'add', 'origin', remote]);
 };
 git_repo(join(code, 'repo'), 'https://github.com/someone-else/repo.git');
 git_repo(join(code, 'team', 'renamed'), 'git@github.com:Octo/Repo.git');
@@ -1005,10 +1007,10 @@ click_test_id('menu-whiteboard');
 await wait_for(() => has('Made a Whiteboard for the pull request'), { label: 'the PR in Whiteboard' });
 const made_board = wb().find((c) => c.cmd === 'whiteboard api session_create');
 check(
-	'Open in Whiteboard starts Whiteboard, then makes the board in the checkout with the PR’s remote',
-	wb().map((c) => c.cmd).slice(0, 3).join() === 'whiteboard api session_list,whiteboard app launch,whiteboard api session_list' &&
-		JSON.stringify(JSON.parse(made_board!.stdin!)) ===
-			JSON.stringify({ target: { kind: 'pullRequest', repositoryPath: join(code, 'team', 'renamed'), pullRequest: 'https://github.com/octo/repo/pull/4' } })
+  'Open in Whiteboard starts Whiteboard, then makes the board in the checkout with the PR’s remote',
+  wb().map((c) => c.cmd).slice(0, 3).join() === 'whiteboard api session_list,whiteboard app launch,whiteboard api session_list' &&
+  JSON.stringify(JSON.parse(made_board!.stdin!)) ===
+  JSON.stringify({ target: { kind: 'pullRequest', repositoryPath: join(code, 'team', 'renamed'), pullRequest: 'https://github.com/octo/repo/pull/4' } })
 );
 check('the checkout is remembered', saved().repo_paths['octo/repo'] === join(code, 'team', 'renamed'));
 click_test_id('card-4');
@@ -1024,23 +1026,23 @@ await wait_for(() => !find_test_id('job'), { label: 'the job ends' });
 
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
-	({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
+  ({ subject: { type, title, url }, repository: { full_name: 'octo/repo', html_url: 'https://github.com/octo/repo' } }) as Notification;
 check(
-	'an advisory card opens the advisory',
-	(await link(subject('RepositoryAdvisory', 'Bad thing', null))) === 'https://github.com/octo/repo/security/advisories/GHSA-1'
+  'an advisory card opens the advisory',
+  (await link(subject('RepositoryAdvisory', 'Bad thing', null))) === 'https://github.com/octo/repo/security/advisories/GHSA-1'
 );
 check(
-	'an advisory that is not found opens the advisory list',
-	(await link(subject('RepositoryAdvisory', 'Unknown', null))) === 'https://github.com/octo/repo/security/advisories'
+  'an advisory that is not found opens the advisory list',
+  (await link(subject('RepositoryAdvisory', 'Unknown', null))) === 'https://github.com/octo/repo/security/advisories'
 );
 check(
-	'a release card opens the release',
-	(await link(subject('Release', 'v1', 'https://api.github.com/repos/octo/repo/releases/1'))) ===
-		'https://github.com/octo/repo/releases/tag/v1'
+  'a release card opens the release',
+  (await link(subject('Release', 'v1', 'https://api.github.com/repos/octo/repo/releases/1'))) ===
+  'https://github.com/octo/repo/releases/tag/v1'
 );
 check(
-	'a PR card opens the PR',
-	(await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
+  'a PR card opens the PR',
+  (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 132);
+finish('gitbox', 136);

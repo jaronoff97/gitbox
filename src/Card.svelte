@@ -2,7 +2,7 @@
 	import { ago } from './ago.ts';
 	import type { GpuixEvent, ShadowNode } from 'gpuix-svelte';
 	import { words } from './filters.ts';
-	import { link, open_url, type Notification } from './gh.ts';
+	import { link, number, open_url, web_url, type Notification } from './gh.ts';
 	import { card_nodes } from './card_nodes.ts';
 	import { subject_icon } from './icons.ts';
 
@@ -38,6 +38,8 @@
 
 
 	let subject = $derived(subject_icon(n));
+	/** A PR's or an issue's number; other subjects (a release's URL ends in an id too) have none. */
+	let num = $derived(web_url(n.subject.url) ? number(n) : '');
 
 	const open = () => link(n).then(open_url);
 	const REVIEW_TONE = { approved: 'ok', 'changes requested': 'fail', commented: 'muted', none: 'muted' };
@@ -65,6 +67,8 @@
 			<img class="avatar" src={n.repository.owner.avatar_url} alt={n.repository.owner.login} />
 		{/if}
 		<div class="repo">{n.repository.full_name}</div>
+		{#if num}<div class="num">#{num}</div>{/if}
+		<div class="grow"></div>
 		<div class="when">{ago(n.updated_at)}</div>
 		{#if selected}<div class="tick">✓</div>{/if}
 	</div>
@@ -146,11 +150,16 @@
 		border-radius: 4px;
 	}
 	.repo {
-		flex-grow: 1;
 		min-width: 0;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		overflow: hidden;
+	}
+	.num {
+		flex-shrink: 0;
+	}
+	.grow {
+		flex-grow: 1;
 	}
 	.when {
 		font-size: var(--text-xs, 11px);
