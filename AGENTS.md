@@ -146,7 +146,8 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   as instructions the user's login and their 20 newest unread notifications, as the model's
   context is about 4,000 tokens. The prompt goes through stdin, and the reply streams into a
   `<markdown>`. The chats are module state, so they outlive a switch of tabs. The model only talks
-  for now. The test puts a fake `fm` beside the fake `gh`.
+  for now. `once` asks one question with no conversation (the Whiteboard draft). The test puts a
+  fake `fm` beside the fake `gh`.
 - `src/ago.ts` — "now", "5m", "3h", "2d", then a date: cards, automation activity and chats.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.
@@ -184,8 +185,14 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   makes the PR's board, or returns the one it has; `session_open` opens one that didn't open itself.
   A Whiteboard that isn't running is started with `whiteboard app launch`. The checkout is the one
   remembered in `repo_paths`, one Whiteboard knows (`session_list`), or a git repository one or
-  two levels under Settings → Advanced → Code folders whose remote is the PR's `owner/repo`. The
-  test has a fake `whiteboard` and real temporary git repositories.
+  two levels under Settings → Advanced → Code folders whose remote is the PR's `owner/repo`. An
+  empty board (`session_get --json` gives `{}`) gets a first draft from Apple's on-device model
+  (`draft`, through `once` in `src/fm.ts`), in the background: a note that the model wrote it, What
+  and why, Changes (each of the 15 largest files: the model's sentence or two, a link to and a
+  `code_peek` of its largest hunk, whose lines come from the diff, not the model; lock files are
+  only listed) and What to check. The structure goes down first, under a Whiteboard activity, so a
+  reader watches it fill. The test has a fake `whiteboard`, real temporary git repositories, and
+  fake answers from `fm`.
 - `src/Toast.svelte` — short messages at the bottom of the window.
 - `src/jobs.svelte.ts`, `src/Jobs.svelte` — background work and its progress popup, in the
   top-right corner under the toolbar on every tab. `track(title, work)` shows a job until `work`

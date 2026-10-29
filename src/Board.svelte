@@ -119,7 +119,13 @@
 	async function act(action: Action, n: Notification, body?: string): Promise<boolean> {
 		try {
 			if (action === 'open') return (gh.open_url(await gh.link(n)), true);
-			if (action === 'whiteboard') return (toast(await open_pr(n)), true);
+			if (action === 'whiteboard') {
+				const { text, drafting } = await open_pr(n);
+				toast(text);
+				// An empty board fills in the background, in the progress popup.
+				drafting?.then(toast, (e: Error) => toast(`Could not draft the Whiteboard: ${e.message}`, true));
+				return true;
+			}
 			if (action === 'copy') {
 				const url = await gh.link(n);
 				await gh.copy(url);

@@ -56,6 +56,13 @@ else if (page) {
 	console.log(JSON.stringify([[{ summary: 'Bad thing', html_url: 'https://github.com/octo/repo/security/advisories/GHSA-1' }]]));
 } else if (cmd === 'api https://api.github.com/repos/octo/repo/releases/1 --jq .html_url') {
 	console.log('https://github.com/octo/repo/releases/tag/v1');
+} else if (cmd.startsWith('pr diff ')) {
+	// A PR for the Whiteboard draft: a file with two hunks, a deleted file and a lock file.
+	console.log(['diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1,2 +1,3 @@', ' a', '+b', ' c', '@@ -10,2 +10,4 @@', ' x', '+y', '+z', ' w',
+		'diff --git a/old.ts b/old.ts', 'deleted file mode 100644', '--- a/old.ts', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-gone', '-too',
+		'diff --git a/package-lock.json b/package-lock.json', '--- a/package-lock.json', '+++ b/package-lock.json', '@@ -1 +1 @@', '-1', '+2'].join('\\n'));
+} else if (cmd.startsWith('pr view ')) {
+	console.log(JSON.stringify({ title: 'Note 4', body: 'Why it changes.' }));
 } else if ((cmd.startsWith('api -X ') && cmd.includes(' notifications/threads/')) || /^(pr|issue) (close|reopen|comment|review) /.test(cmd)) {
 	// Card actions (#2): logged for the test to read; thread 12 refuses to be marked done.
 	const stdin = cmd.includes('--body-file -') ? require('fs').readFileSync(0, 'utf8') : undefined;
@@ -102,6 +109,15 @@ const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 if (args[0] === 'available') {
 	if (process.env.FAKE_NO_FM) { console.error('\\x1b[31mApple Intelligence is not enabled\\x1b[0m'); process.exit(1); }
 	console.log('System model available');
+} else if (args[0] === 'respond' && args.includes('--guardrails')) {
+	// A one-shot question for a Whiteboard draft: a file's summary, the opening, or what to check
+	// (quoted, with a bullet inside, as the real model sometimes answers).
+	const prompt = fs.readFileSync(0, 'utf8');
+	const ins = opt('--instructions');
+	fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'fm once', instructions: ins }) + '\\n');
+	if (ins.includes('one file')) process.stdout.write('It changes ' + prompt.match(/^File: (\\S+)/m)[1] + '.');
+	else if (ins.includes('opening')) process.stdout.write('It adds a feature.');
+	else process.stdout.write('"- Check A."\\n- "Check B."');
 } else if (args[0] === 'respond') {
 	const prompt = fs.readFileSync(0, 'utf8');
 	const turn = (opt('--resume') ? JSON.parse(fs.readFileSync(opt('--resume'), 'utf8')).turn : 0) + 1;
@@ -134,6 +150,15 @@ if (args[0] === 'app' && args[1] === 'launch') {
 		fs.writeFileSync(up + '-made', '');
 		console.log(JSON.stringify({ created: !again, sessionId: 's-1', opened: !again }));
 	} else if (args[1] === 'session_open') console.log('{}');
+	// A board is empty until its first edit.
+	else if (args[1] === 'session_get') console.log(fs.existsSync(up + '-edits') ? '{"0":{"id":"block-1"}}' : '{}');
+	else if (args[1] === 'session_activity_begin') console.log('{"activityId":"a-1"}');
+	else if (args[1] === 'session_activity_end') console.log('{}');
+	else if (args[1] === 'session_edit') {
+		const k = (fs.existsSync(up + '-edits') ? +fs.readFileSync(up + '-edits', 'utf8') : 0) + 1;
+		fs.writeFileSync(up + '-edits', String(k));
+		console.log(JSON.stringify({ targetId: 'block-' + k, children: [{ id: 'block-' + k + '-1', type: 'markdown' }] }));
+	}
 }
 `,
   { mode: 0o755 }
@@ -1013,10 +1038,38 @@ check(
   JSON.stringify({ target: { kind: 'pullRequest', repositoryPath: join(code, 'team', 'renamed'), pullRequest: 'https://github.com/octo/repo/pull/4' } })
 );
 check('the checkout is remembered', saved().repo_paths['octo/repo'] === join(code, 'team', 'renamed'));
+// The new board is empty: Apple's on-device model drafts it. The structure goes down first, each
+// summarized file gets a link and a peek at its largest hunk, a lock file is only listed, and the
+// placeholder becomes the summary.
+await wait_for(() => has('Drafted the Whiteboard for Note 4'), { timeout: 8000, label: 'the draft' });
+const edits = wb()
+  .filter((c) => c.cmd === 'whiteboard api session_edit')
+  .map((c) => JSON.parse(c.stdin!) as { activityId: string; edit: { type: string; parentId?: string; targetId?: string; changes?: { markdown: string }; content?: { type: string; title?: string; markdown?: string; source?: string; children?: { markdown: string }[] } } });
+const contents = edits.map((e) => e.edit.content);
+check(
+  'the draft writes a note, What and why, and Changes first',
+  contents[0]?.type === 'callout' && contents[1]?.title === 'What and why' && contents[2]?.title === 'Changes' && edits.every((e) => e.activityId === 'a-1')
+);
+check(
+  'a summarized file links its largest hunk and peeks at it',
+  contents.some((c) => c?.markdown === '**[src/a.ts](whiteboard:source/head/src/a.ts#L10-L13)** · +3 −0\n\nIt changes src/a.ts.') &&
+  contents.some((c) => c?.type === 'code_peek' && c.source === 'head/src/a.ts#L10-L13') &&
+  contents.some((c) => c?.markdown === '**old.ts** · +0 −2\n\nIt changes old.ts.') &&
+  contents.some((c) => c?.markdown === 'Also changed: `package-lock.json` (+1 −1).')
+);
+check(
+  'the summary replaces the placeholder, and What to check comes as clean bullets',
+  edits.some((e) => e.edit.type === 'update' && e.edit.targetId === 'block-2-1' && e.edit.changes?.markdown === 'It adds a feature.') &&
+  contents.at(-1)?.title === 'What to check' && contents.at(-1)?.children?.[0].markdown === '- Check A.\n- Check B.'
+);
+check('the draft ends its activity', wb().some((c) => c.cmd === 'whiteboard api session_activity_end'));
 click_test_id('card-4');
 press('w');
 await wait_for(() => has('Opened the pull request’s Whiteboard'), { label: 'w opens the board again' });
-check('w on a PR opens its board, which exists now', wb().some((c) => c.cmd === 'whiteboard api session_open'));
+check(
+  'w on a PR opens its board, which exists now and has content, so nothing drafts it again',
+  wb().some((c) => c.cmd === 'whiteboard api session_open') && calls().filter((c) => c.cmd === 'fm once').length === 4
+);
 // Note 20 is a review request in octo/other, which has no checkout here.
 await right_click(20);
 click_test_id('menu-whiteboard');
@@ -1045,4 +1098,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 136);
+finish('gitbox', 137);
