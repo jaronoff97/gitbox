@@ -40,19 +40,63 @@ async function api<T>(tool: string, input: object, onstart: () => void): Promise
 	}
 }
 
-/** The GitHub repositories (`owner/repo`, lower case) that a checkout's remotes point at. */
-async function remotes(path: string): Promise<string[]> {
+/** A checkout's remotes, each with the GitHub repository (`owner/repo`, lower case) it points at. */
+async function remotes(path: string): Promise<{ name: string; url: string; repo: string }[]> {
 	try {
 		const { stdout } = await exec('git', ['-C', path, 'remote', '-v'], { env: env() });
 		// https://github.com/owner/repo.git and git@github.com:owner/repo.git alike: the last two parts.
 		return stdout
 			.split('\n')
-			.map((line) => line.split(/\s+/)[1] ?? '')
-			.filter(Boolean)
-			.map((url) => url.replace(/\.git$/, '').split(/[/:]/).slice(-2).join('/').toLowerCase());
+			.filter((line) => line.endsWith('(fetch)'))
+			.map((line) => {
+				const [name, url] = line.split(/\s+/);
+				return { name, url, repo: url.replace(/\.git$/, '').split(/[/:]/).slice(-2).join('/').toLowerCase() };
+			});
 	} catch {
 		return [];
 	}
+}
+
+const tilde = (path: string) => path.replace(homedir(), '~');
+
+/** A clone of a fork of the PR's repository whose remotes don't include the repository itself:
+ * Whiteboard fetches the PR from a remote for the PR's repository, so it can't use the clone yet. */
+export class ForkCheckout extends Error {
+	path: string;
+	fork: string;
+	repo: string;
+	/** The repository's URL, in the fork remote's protocol (SSH or HTTPS). */
+	url: string;
+	constructor(path: string, fork: { url: string; repo: string }, repo: string) {
+		super(`${tilde(path)} is a clone of the fork ${fork.repo}, with no remote for ${repo}.`);
+		this.path = path;
+		this.fork = fork.repo;
+		this.repo = repo;
+		this.url = fork.url.replace(/[^/:]+\/[^/]+?(\.git)?$/, `${repo}$1`);
+	}
+}
+
+/** Adds the PR's repository to a fork's clone as `upstream` (or as its owner's name, if `upstream`
+ * is taken), so Whiteboard can fetch the PR. Only after the user asks for it. */
+export async function add_upstream(f: ForkCheckout): Promise<string> {
+	const taken = (await remotes(f.path)).some((r) => r.name === 'upstream');
+	const name = taken ? f.repo.split('/')[0] : 'upstream';
+	await exec('git', ['-C', f.path, 'remote', 'add', name, f.url], { env: env() });
+	return `Added ${f.repo} to ${tilde(f.path)} as ${name}`;
+}
+
+/** Among `paths`, a clone whose remote is a fork of `repo` (`owner/name`, lower case), asked of
+ * GitHub (the fork's parent, or the source of a fork of a fork); remotes named like the repository
+ * only, so this costs a gh call for each likely fork. */
+async function fork_of(repo: string, paths: string[]): Promise<{ path: string; remote: { url: string; repo: string } } | null> {
+	const name = repo.split('/')[1];
+	for (const path of paths)
+		for (const remote of await remotes(path)) {
+			if (remote.repo === repo || remote.repo.split('/')[1] !== name) continue;
+			const parents = await gh('api', `repos/${remote.repo}`, '--jq', '[.parent.full_name, .source.full_name] | join(" ")').catch(() => '');
+			if (parents.toLowerCase().split(' ').includes(repo)) return { path, remote };
+		}
+	return null;
 }
 
 /** Settings → Advanced → Code folders, with ~ expanded. */
@@ -95,10 +139,12 @@ async function checkout(repo: string, onstart: () => void): Promise<string | nul
 		...candidates(key.split('/')[1])
 	].filter((p): p is string => Boolean(p));
 	for (const path of new Set(paths)) {
-		if (!(await remotes(path)).includes(key)) continue;
+		if (!(await remotes(path)).some((r) => r.repo === key)) continue;
 		if (known[key] !== path) save({ repo_paths: { ...known, [key]: path } });
 		return path;
 	}
+	const fork = await fork_of(key, [...new Set(paths)]);
+	if (fork) throw new ForkCheckout(fork.path, fork.remote, repo);
 	return null;
 }
 

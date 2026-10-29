@@ -17,7 +17,7 @@
 	import { notifications, PER_PAGE, viewer, type Action, type Notification } from './gh.ts';
 	import { gear, sync } from './icons.ts';
 	import { track } from './jobs.svelte.ts';
-	import { open_pr } from './whiteboard.ts';
+	import { add_upstream, ForkCheckout, open_pr } from './whiteboard.ts';
 	import { LANE_TITLES, lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
 
 	/** Back to onboarding, for when gh stops working after setup (a logout, say). `active`: the
@@ -70,15 +70,16 @@
 	let request_seq = 0;
 	/** A card action's dialog is open: ⌘↩ is its key then (the comment dialog sends with it). */
 	let dialog = $state(false);
-	type Note = { id: number; text: string; error: boolean; open?: () => void };
+	type Note = { id: number; text: string; error: boolean; open?: () => void; action?: string };
 	let toasts = $state<Note[]>([]);
 	let toast_id = 0;
 
-	/** Shows `text`; with `open`, the toast offers ⌘↩ (or a click) to open what the action touched. */
-	function toast(text: string, error = false, open?: () => void) {
+	/** Shows `text`; with `open`, the toast offers ⌘↩ (or a click) to open what the action touched, or
+	 * to do `action` (its label), which stays longer to be read. */
+	function toast(text: string, error = false, open?: () => void, action?: string) {
 		const id = ++toast_id;
-		toasts.push({ id, text, error, open });
-		setTimeout(() => dismiss(id), error ? 7000 : open ? 6000 : 3000);
+		toasts.push({ id, text, error, open, action });
+		setTimeout(() => dismiss(id), action ? 12000 : error ? 7000 : open ? 6000 : 3000);
 	}
 	const dismiss = (id: number) => (toasts = toasts.filter((t) => t.id !== id));
 
@@ -120,7 +121,13 @@
 		try {
 			if (action === 'open') return (gh.open_url(await gh.link(n)), true);
 			if (action === 'whiteboard') {
-				const { text, drafting } = await open_pr(n);
+				const { text, drafting } = await open_pr(n).catch((e) => {
+					// A clone of the user's fork: offer to add the PR's repository as a remote, then try again.
+					if (!(e instanceof ForkCheckout)) throw e;
+					toast(e.message, true, () => add_upstream(e).then((done) => (toast(done), act('whiteboard', n)), (err: Error) => toast(err.message, true)), 'Add upstream');
+					return { text: '', drafting: undefined };
+				});
+				if (!text) return false;
 				toast(text);
 				// An empty board fills in the background, in the progress popup.
 				drafting?.then(toast, (e: Error) => toast(`Could not draft the Whiteboard: ${e.message}`, true));

@@ -193,7 +193,11 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   makes the PR's board, or returns the one it has; `session_open` opens one that didn't open itself.
   A Whiteboard that isn't running is started with `whiteboard app launch`. The checkout is the one
   remembered in `repo_paths`, one Whiteboard knows (`session_list`), or a git repository one or
-  two levels under Settings → Advanced → Code folders whose remote is the PR's `owner/repo`. An
+  two levels under Settings → Advanced → Code folders whose remote is the PR's `owner/repo`. If
+  none has it but a clone's remote is a fork of it (GitHub's `parent` or `source`), `ForkCheckout`
+  names the clone, and the toast's "Add upstream" adds the repository as `upstream` (or its owner's
+  name), in the fork remote's protocol, then opens the PR: Whiteboard fetches a PR only from a
+  remote for its repository. An
   empty board (`session_get --json` gives `{}`) gets a first draft from Apple's on-device model
   (`draft`, through `once` in `src/fm.ts`), in the background: a note that the model wrote it, What
   and why, Changes (each of the 15 largest files: the model's sentence or two, a link to and a

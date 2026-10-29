@@ -56,6 +56,9 @@ else if (page) {
 	console.log(JSON.stringify([[{ summary: 'Bad thing', html_url: 'https://github.com/octo/repo/security/advisories/GHSA-1' }]]));
 } else if (cmd === 'api https://api.github.com/repos/octo/repo/releases/1 --jq .html_url') {
 	console.log('https://github.com/octo/repo/releases/tag/v1');
+} else if (/^api repos\\/[^ ]+ --jq /.test(cmd)) {
+	// A repository's parent and source: me/other is a fork of octo/other; the rest are no forks.
+	console.log(cmd.startsWith('api repos/me/other ') ? 'octo/other octo/other' : ' ');
 } else if (cmd.startsWith('pr diff ')) {
 	// A PR for the Whiteboard draft: a file with two hunks, a deleted file and a lock file.
 	console.log(['diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1,2 +1,3 @@', ' a', '+b', ' c', '@@ -10,2 +10,4 @@', ' x', '+y', '+z', ' w',
@@ -1186,6 +1189,35 @@ click_test_id('menu-whiteboard');
 await wait_for(() => text().includes('No checkout of octo/other'), { label: 'no checkout' });
 check('a repository with no checkout says where gitbox looked', text().includes(`No checkout of octo/other in ${code}`));
 await wait_for(() => !find_test_id('job'), { label: 'the job ends' });
+// A clone of the user's fork has no remote for the PR's repository, which Whiteboard fetches from:
+// gitbox names the clone and the fork, and adds the repository as upstream (in the fork remote's
+// protocol) only when asked; then the PR opens there. A clone named alike that is no fork isn't offered.
+git_repo(join(code, 'other'), 'https://github.com/stranger/other.git');
+git_repo(join(code, 'mine', 'other'), 'git@github.com:me/other.git');
+const upstream = () => {
+  try {
+    return execFileSync('git', ['-C', join(code, 'mine', 'other'), 'remote', 'get-url', 'upstream'], { stdio: 'pipe' }).toString().trim();
+  } catch {
+    return '';
+  }
+};
+await right_click(20);
+click_test_id('menu-whiteboard');
+await wait_for(() => text().includes('is a clone of the fork me/other'), { label: 'a fork’s clone' });
+check(
+  'a fork’s clone is named, and nothing changes until asked',
+  text().includes(`${join(code, 'mine', 'other')} is a clone of the fork me/other, with no remote for octo/other.`) && has('Add upstream') && upstream() === ''
+);
+click(find_test_id('toast-open', { last: true })!);
+const create_20 = () => wb().find((c) => c.cmd === 'whiteboard api session_create' && c.stdin!.includes('/pull/20'));
+await wait_for(() => !!create_20() && text().includes('Added octo/other to'), { label: 'upstream, then the PR' });
+check(
+  'Add upstream adds the repository in the fork’s protocol, and the PR opens in that clone',
+  upstream() === 'git@github.com:octo/other.git' &&
+  JSON.parse(create_20()!.stdin!).target.repositoryPath === join(code, 'mine', 'other')
+);
+await wait_for(() => has('Drafted the Whiteboard for Note 20'), { timeout: 8000, label: 'its draft' });
+await wait_for(() => !find_test_id('job'), { label: 'the job ends' });
 
 // A card opens the subject's own page; an advisory, which comes with no URL, is found by its title.
 const subject = (type: string, title: string, url: string | null) =>
@@ -1208,4 +1240,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 147);
+finish('gitbox', 149);
