@@ -164,7 +164,9 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   so cards, toasts and progress behave as for a click, and it waits for the user's Confirm in the
   chat (`confirm`). Claude gets the server through `--mcp-config` with `--setting-sources ''`
   (`--safe-mode` would drop it) and only `mcp__gitbox` allowed; Codex through
-  `-c mcp_servers.gitbox.url`; fm can't call tools. The test's fake `claude` calls the server as a
+  `-c mcp_servers.gitbox.url`, with its tools approved (`default_tools_approval_mode`), as `codex
+  exec` refuses MCP tools that need approval; fm can't call tools. No agent argument may be empty:
+  Bun's spawn drops it. The test's fake `claude` calls the server as a
   real MCP client.
 - `src/ago.ts` — "now", "5m", "3h", "2d", then a date: cards, automation activity and chats.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
