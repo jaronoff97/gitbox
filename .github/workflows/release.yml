@@ -1,7 +1,13 @@
-# Push a tag such as v0.1.0 (matching package.json's version) to build the macOS app and attach its
-# .dmg to a GitHub release. Run it by hand (Actions → release → Run workflow, or
-# `gh workflow run release.yml`) for a dry run: the same build, with the .dmg kept as a run
-# artifact and no release.
+# Releases with release-please (https://github.com/googleapis/release-please). Every push to main
+# updates a release PR from the Conventional Commits merged since the last release: `feat:` raises
+# the minor version and `fix:` the patch (before 1.0, a breaking change raises the minor too).
+# Merging that PR bumps package.json, writes CHANGELOG.md, tags vX.Y.Z and makes the GitHub release;
+# then this workflow builds the macOS app and attaches its .dmg to that release. (A tag made with
+# GITHUB_TOKEN starts no other workflow, so the build runs here.) Its settings are in
+# release-please-config.json and .release-please-manifest.json.
+#
+# Run it by hand (Actions → release → Run workflow, or `gh workflow run release.yml`) for a dry run:
+# the same build, with the .dmg kept as a run artifact and no release.
 #
 # The app is signed ad hoc unless the CODESIGN_IDENTITY / NOTARY_PROFILE setup in build.ts is added
 # here (a certificate imported into the runner's keychain, and a notarytool profile).
@@ -9,26 +15,46 @@ name: release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: write
+  # release-please labels its release PRs.
+  issues: write
 
 jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+
   macos:
+    needs: release-please
+    # A release, or a dry run by hand; always() lets the dry run go on when release-please is skipped.
+    if: always() && (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name || github.ref }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
       - name: Check the tag matches package.json
-        if: github.ref_type == 'tag'
+        if: needs.release-please.outputs.release_created == 'true'
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           version="v$(bun -e 'console.log(require("./package.json").version)')"
-          if [ "$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json ($version)"
+          if [ "$version" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match package.json ($version)"
             exit 1
           fi
       - run: bun install --frozen-lockfile
@@ -36,14 +62,15 @@ jobs:
       - run: bun run test
       - run: bun run build
       - name: Keep the .dmg (dry run)
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: gitbox-dmg
           path: dist/*.dmg
           retention-days: 7
-      - name: Release
-        if: github.ref_type == 'tag'
+      - name: Attach the .dmg to the release
+        if: needs.release-please.outputs.release_created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.dmg --title "Gitbox $GITHUB_REF_NAME" --generate-notes
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "$TAG" dist/*.dmg --clobber

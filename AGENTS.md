@@ -70,6 +70,23 @@ every mount and hot reload.
 - Handlers take `GpuixEvent` and `{@attach}` gets a `ShadowNode`, both importable as types from
   `gpuix-svelte`.
 
+## Commits and releases
+
+- A pull request's title is a [Conventional Commit](https://www.conventionalcommits.org):
+  `type(scope): subject`, the subject in lower case and the imperative, with no full stop.
+  Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`;
+  scopes name the part (`chat`, `whiteboard`, `cards`…). `.github/workflows/pr-title.yml` checks it.
+  Write commit messages the same way.
+- PRs are squash-merged, with the title as the commit's message; only squash merges are on.
+  [release-please](https://github.com/googleapis/release-please) reads those commits: `feat` raises
+  the minor version, `fix` the patch, and before 1.0 a breaking change (`feat!:`, or a
+  `BREAKING CHANGE:` footer) raises the minor too. Its config is `release-please-config.json`, and
+  `.release-please-manifest.json` holds the released version.
+- A PR description can replace its commit for the changelog with lines between
+  `BEGIN_COMMIT_OVERRIDE` and `END_COMMIT_OVERRIDE`, one Conventional Commit per line.
+- Stacked PRs: squash-merge from the bottom; then rebase the next branch onto `main`
+  (`git rebase --onto main <old base>`), as the squash leaves its old commits behind.
+
 ## TypeScript
 
 `.ts` files run through Node's and Bun's built-in type stripping, not a compiler, and `tsconfig.json`
@@ -243,5 +260,10 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   clipboard stays as it was.
 - `standalone.ts`, `build.ts` — the entry and the Bun build script behind `npm run build`; on
   macOS it also makes `dist/Gitbox.app` and a `.dmg`, signed from `CODESIGN_IDENTITY`.
-- `.github/workflows/release.yml` — a `v*` tag builds the `.dmg` and attaches it to a release.
+- `.github/workflows/release.yml` — release-please on every push to `main` (the release PR, then the
+  tag and the GitHub release when it merges), and the macOS build that attaches the `.dmg`. Run by
+  hand, it is a dry run that keeps the `.dmg` as an artifact.
+- `.github/workflows/pr-title.yml` — checks that a PR's title is a Conventional Commit.
+- `release-please-config.json`, `.release-please-manifest.json` — release-please's settings, and the
+  last released version.
 - `tsconfig.json`, `svelte.d.ts`, `svelte.config.js` — TypeScript and svelte-check setup.
