@@ -1,0 +1,13 @@
+{
+	"$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+	"release-type": "node",
+	"include-component-in-tag": false,
+	"bump-minor-pre-major": true,
+	"bootstrap-sha": "aaf605b001d7f978cbd1730db725e25415a2cc9b",
+	"packages": {
+		".": {
+			"package-name": "gitbox",
+			"changelog-path": "CHANGELOG.md"
+		}
+	}
+}

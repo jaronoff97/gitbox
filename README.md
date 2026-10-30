@@ -48,8 +48,12 @@ A change to a `.ts` file needs a restart of `npm start`.
 
 ## Release
 
-Set the version in `package.json`, then push a tag such as `v0.1.0`. The release workflow builds
-the `.dmg` on macOS and attaches it to a GitHub release.
+Releases come from [release-please](https://github.com/googleapis/release-please). Pull request
+titles follow [Conventional Commits](https://www.conventionalcommits.org) (`feat: …`, `fix: …`;
+`pr-title.yml` checks them), and PRs are squash-merged, so each title is a commit on `main`. Every
+push to `main` updates a release PR with the next version and its changelog. Merging that PR bumps
+`package.json`, writes `CHANGELOG.md`, tags `vX.Y.Z` and makes the GitHub release, and the release
+workflow attaches the `.dmg` it builds on macOS.
 
 To sign and notarize, set `CODESIGN_IDENTITY` (a Developer ID Application certificate) and
 `NOTARY_PROFILE` (a `notarytool` keychain profile) when you run `npm run build`. `build.ts`
