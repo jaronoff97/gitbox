@@ -10,6 +10,7 @@ import { score } from './src/fuzzy.ts';
 import { link, type Notification } from './src/gh.ts';
 import { menu_json } from './src/menubar.ts';
 import { update } from './src/settings.svelte.ts';
+import { ask } from './src/agents.ts';
 import { palette as colors } from './src/theme.ts';
 
 // A fake `gh` first on PATH: signed out until FAKE_AUTHED is set, then 290 notifications in API
@@ -1105,11 +1106,13 @@ await say('h e l l o', 'Claude says hello');
 const first_claude = agent_calls('claude')[0].args;
 check(
   'a Claude chat has its model, none of the user’s settings, no built-in tools, and the instructions as its system prompt',
-  first_claude.includes('--strict-mcp-config') && first_claude[first_claude.indexOf('--setting-sources') + 1] === '' && first_claude[first_claude.indexOf('--model') + 1] === 'haiku' &&
-  first_claude[first_claude.indexOf('--tools') + 1] === '' && first_claude[first_claude.indexOf('--system-prompt') + 1].includes('The user is octocat')
+  first_claude.includes('--strict-mcp-config') && first_claude.includes('--setting-sources=') && first_claude[first_claude.indexOf('--model') + 1] === 'haiku' &&
+  first_claude.includes('--tools=') && first_claude[first_claude.indexOf('--system-prompt') + 1].includes('The user is octocat')
 );
 await say('m o r e', 'Claude says more again');
 check('its next turn resumes Claude’s session', agent_calls('claude')[1].args.join(' ').includes('--resume claude-1'));
+// Bun's spawn drops an empty argument (Node keeps it), so an agent's flags never have one.
+check('no agent gets an empty argument', agent_calls('claude').every((c) => !c.args.includes('')));
 check(
   'a Claude chat gets the board’s tools through gitbox’s MCP server, and only those',
   first_claude[first_claude.indexOf('--allowedTools') + 1] === 'mcp__gitbox' && first_claude.includes('dontAsk') &&
@@ -1148,6 +1151,12 @@ update({ chat_agent: 'codex', chat_model: '' });
 click_test_id('chat-new');
 await say('h i', 'Codex says hi');
 check('a Codex chat starts with the instructions in its prompt', agent_calls('codex')[0].stdin.startsWith('You are the assistant in Gitbox'));
+// `codex exec` asks nothing, so it refuses MCP tools that need approval: gitbox's server is approved.
+check(
+  'a Codex chat gets gitbox’s server, approved',
+  agent_calls('codex')[0].args.some((a) => a.startsWith('mcp_servers.gitbox.url="http://127.0.0.1:')) &&
+  agent_calls('codex')[0].args.includes('mcp_servers.gitbox.default_tools_approval_mode="approve"')
+);
 await say('a g a i n', 'Codex says again');
 check('and resumes its thread', agent_calls('codex')[1].args.slice(0, 2).join() === 'exec,resume' && agent_calls('codex')[1].args.includes('codex-1'));
 click_test_id('chat-input');
@@ -1160,6 +1169,8 @@ click_test_id(`chat-${claude_chat.id}`);
 pump();
 await say('b a c k', 'Claude says back again');
 check('a chat keeps the agent it started with', agent_calls('claude').length === 5 && agent_calls('codex').length === 3);
+// A caller with no ontext (a Whiteboard draft) still gets the reply.
+check('ask() returns the reply without ontext', (await ask('codex', 'quiet', { instructions: '', mode: 'chat' })).text === 'Codex says quiet');
 update({ chat_agent: 'fm', chat_model: '' });
 press('ctrl-1');
 
@@ -1288,4 +1299,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 154);
+finish('gitbox', 157);

@@ -108,12 +108,12 @@ async function claude(prompt: string, turn: Turn) {
 			? // A chat: none of the user's hooks or plugins (their settings) or MCP servers, and no built-in
 				// tools; only gitbox's board tools. (--safe-mode would also drop CLAUDE.md, but it drops
 				// --mcp-config too.)
+				// `=` with nothing after it: Bun's spawn drops an empty argument, so `--setting-sources ''`
+				// would take the next flag as its value.
 				[
-					'--setting-sources',
-					'',
+					'--setting-sources=',
 					'--strict-mcp-config',
-					'--tools',
-					'',
+					'--tools=',
 					'--system-prompt',
 					turn.instructions,
 					...(turn.tools
@@ -129,7 +129,11 @@ async function claude(prompt: string, turn: Turn) {
 		if (e.session_id) session = e.session_id;
 		const ev = e.event;
 		if (e.type === 'stream_event' && ev?.type === 'message_start') text = '';
-		if (e.type === 'stream_event' && ev?.delta?.type === 'text_delta') turn.ontext?.((text += ev.delta.text));
+		// Not `ontext?.((text += …))`: with no ontext, `?.` would skip the assignment too.
+		if (e.type === 'stream_event' && ev?.delta?.type === 'text_delta') {
+			text += ev.delta.text;
+			turn.ontext?.(text);
+		}
 		if (e.type === 'assistant')
 			for (const c of e.message?.content ?? []) if (c.type === 'tool_use') turn.onstep?.(c.name.replace(/^mcp__.+?__/, ''));
 		if (e.type === 'result') e.is_error ? (error = e.result || e.subtype) : (text = e.result ?? text);
@@ -145,7 +149,9 @@ async function codex(prompt: string, turn: Turn) {
 		'-c',
 		'sandbox_mode="read-only"',
 		...(turn.model ? ['-m', turn.model] : []),
-		...(turn.tools ? ['-c', `mcp_servers.gitbox.url="${turn.tools}"`] : [])
+		// `codex exec` asks nothing, so it refuses MCP tools that need approval; gitbox's are approved
+		// here, as `act` asks the user itself.
+		...(turn.tools ? ['-c', `mcp_servers.gitbox.url="${turn.tools}"`, '-c', 'mcp_servers.gitbox.default_tools_approval_mode="approve"'] : [])
 	];
 	// Codex has no system prompt flag; a new session starts with the instructions.
 	const args = turn.session ? ['exec', 'resume', ...options, turn.session, '-'] : ['exec', ...options, '-'];
@@ -157,7 +163,10 @@ async function codex(prompt: string, turn: Turn) {
 		const item = e.item ?? {};
 		if (e.type === 'item.started' && item.type === 'mcp_tool_call') turn.onstep?.(item.tool);
 		if (e.type === 'item.started' && item.type === 'command_execution') turn.onstep?.(item.command);
-		if (e.type === 'item.completed' && item.type === 'agent_message') turn.ontext?.((text = item.text));
+		if (e.type === 'item.completed' && item.type === 'agent_message') {
+			text = item.text;
+			turn.ontext?.(text);
+		}
 		if (e.type === 'turn.failed' || e.type === 'error') error = inner(e.error?.message ?? e.message);
 	});
 	if ((error || failed) && !text) throw new Error(error || failed);
