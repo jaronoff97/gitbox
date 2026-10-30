@@ -18,6 +18,7 @@
 	import { gear, sync } from './icons.ts';
 	import { track } from './jobs.svelte.ts';
 	import { add_upstream, ForkCheckout, open_pr } from './whiteboard.ts';
+	import { board } from './tools.svelte.ts';
 	import { LANE_TITLES, lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
 
 	/** Back to onboarding, for when gh stops working after setup (a logout, say). `active`: the
@@ -355,6 +356,34 @@
 			}
 		});
 	}
+
+	/** Every page, for the agent's tools (src/tools.svelte.ts): every lane shows all it has, so fill()
+	 * goes on until the API has no more. A load already running picks up the new targets. */
+	async function load_all() {
+		target = Object.fromEntries(LANES.map((l) => [l.key, Infinity]));
+		while (more && !error) {
+			await fill();
+			if (loading) await new Promise((r) => setTimeout(r, 100));
+		}
+	}
+
+	// The board's side of the agent's tools, while it is mounted.
+	$effect(() => {
+		board.current = {
+			items: () => items,
+			more: () => more,
+			load_all,
+			lane_of,
+			filter,
+			// The selection keeps only cards a lane shows, so each lane shows all it has loaded.
+			select: (ids) => {
+				target = Object.fromEntries(LANES.map((l) => [l.key, Infinity]));
+				selected = new Set(ids);
+			},
+			run: run_action
+		};
+		return () => (board.current = null);
+	});
 
 	/** The refresh button and ⌘R: not while a load runs, so a second press can't start it over. */
 	const refresh = () => !loading && start();

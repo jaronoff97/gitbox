@@ -36,6 +36,8 @@ export type Turn = {
 	 * MCP server, which the agent has connected. */
 	mode: 'chat' | 'whiteboard';
 	cwd?: string;
+	/** In a chat: the URL of gitbox's MCP server (src/mcp.ts), whose board tools the agent may use. */
+	tools?: string;
 	/** The reply so far, as it streams. */
 	ontext?: (text: string) => void;
 	/** What the agent is doing: a tool it calls. */
@@ -103,8 +105,21 @@ async function claude(prompt: string, turn: Turn) {
 		...(turn.model ? ['--model', turn.model] : []),
 		...(turn.session ? ['--resume', turn.session] : []),
 		...(turn.mode === 'chat'
-			? // A plain chat: no tools, and none of the user's hooks, plugins or CLAUDE.md.
-				['--safe-mode', '--tools', '', '--system-prompt', turn.instructions]
+			? // A chat: none of the user's hooks or plugins (their settings) or MCP servers, and no built-in
+				// tools; only gitbox's board tools. (--safe-mode would also drop CLAUDE.md, but it drops
+				// --mcp-config too.)
+				[
+					'--setting-sources',
+					'',
+					'--strict-mcp-config',
+					'--tools',
+					'',
+					'--system-prompt',
+					turn.instructions,
+					...(turn.tools
+						? ['--mcp-config', JSON.stringify({ mcpServers: { gitbox: { type: 'http', url: turn.tools } } }), '--permission-mode', 'dontAsk', '--allowedTools', 'mcp__gitbox']
+						: [])
+				]
 			: ['--permission-mode', 'dontAsk', '--allowedTools', ...WHITEBOARD_TOOLS])
 	];
 	let session = turn.session ?? '';
@@ -116,7 +131,7 @@ async function claude(prompt: string, turn: Turn) {
 		if (e.type === 'stream_event' && ev?.type === 'message_start') text = '';
 		if (e.type === 'stream_event' && ev?.delta?.type === 'text_delta') turn.ontext?.((text += ev.delta.text));
 		if (e.type === 'assistant')
-			for (const c of e.message?.content ?? []) if (c.type === 'tool_use') turn.onstep?.(c.name.replace(/^mcp__[a-z_]+?whiteboard__/, ''));
+			for (const c of e.message?.content ?? []) if (c.type === 'tool_use') turn.onstep?.(c.name.replace(/^mcp__.+?__/, ''));
 		if (e.type === 'result') e.is_error ? (error = e.result || e.subtype) : (text = e.result ?? text);
 	});
 	if (error || failed) throw new Error(error || failed);
@@ -129,7 +144,8 @@ async function codex(prompt: string, turn: Turn) {
 		'--skip-git-repo-check',
 		'-c',
 		'sandbox_mode="read-only"',
-		...(turn.model ? ['-m', turn.model] : [])
+		...(turn.model ? ['-m', turn.model] : []),
+		...(turn.tools ? ['-c', `mcp_servers.gitbox.url="${turn.tools}"`] : [])
 	];
 	// Codex has no system prompt flag; a new session starts with the instructions.
 	const args = turn.session ? ['exec', 'resume', ...options, turn.session, '-'] : ['exec', ...options, '-'];

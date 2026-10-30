@@ -27,7 +27,7 @@
 
 	// Module state, so the chat outlives a switch to another tab (which unmounts this one). `id` is the
 	// open conversation; '' is a new one, which the first message makes.
-	const chat = $state({ list: [] as Conversation[], id: '', draft: '', busy: false, loaded: false });
+	const chat = $state({ list: [] as Conversation[], id: '', draft: '', busy: false, loaded: false, step: '' });
 
 	/** Reads the saved conversations, newest first, on the first mount (so a test can point
 	 * XDG_CONFIG_HOME first). A file that doesn't parse is left out. */
@@ -57,6 +57,8 @@
 	import type { GpuixEvent } from 'gpuix-svelte';
 	import { agent, ask, installed } from './agents.ts';
 	import { unavailable } from './fm.ts';
+	import { serve } from './mcp.ts';
+	import { board, confirm, TOOLS } from './tools.svelte.ts';
 	import { settings } from './settings.svelte.ts';
 	import { words } from './filters.ts';
 	import * as gh from './gh.ts';
@@ -83,7 +85,7 @@
 	 * question about them has an answer. The model's context is about 4,000 tokens, hence 20.
 	 * ponytail: the model only talks. To let it act, have it answer in a schema (fm's --schema) that
 	 * names a gh command, and run that after the user confirms. */
-	async function instructions() {
+	async function instructions(tools: boolean) {
 		const [me, list] = await Promise.all([gh.viewer().catch(() => null), gh.notifications(1).catch(() => [])]);
 		const lines = list
 			.slice(0, 20)
@@ -96,7 +98,9 @@
 			'You are the assistant in Gitbox, a Mac app for GitHub notifications. Answer briefly.',
 			me && `The user is ${me.login} on GitHub.`,
 			lines.length ? `Their newest unread notifications, newest first:\n${lines.join('\n')}` : 'They have no unread notifications.',
-			'You cannot act on GitHub yourself. To act, say which gh command would do it.'
+			tools
+				? 'You can read and change the user’s board with your gitbox tools: list_notifications (filters, a lane, or all:true for every page), filter_board, select, and act (read, done, unsubscribe, close, reopen, open), by the ids that list_notifications gives. act asks the user to confirm; say what you are about to do first.'
+				: 'You cannot act on GitHub yourself. To act, say which gh command would do it.'
 		]
 			.filter(Boolean)
 			.join('\n');
@@ -123,19 +127,25 @@
 		c.messages.push({ role: 'model', text: '' });
 		const reply = c.messages[c.messages.length - 1];
 		try {
-			c.instructions ??= await instructions();
-			mkdirSync(chats(), { recursive: true });
 			const by = c.agent ?? 'fm';
-			const { session } = await ask(by, prompt, {
+			// Claude Code and Codex get the board's tools, through gitbox's MCP server; fm can't call tools.
+			const tools = by !== 'fm' && board.current ? await serve(TOOLS) : undefined;
+			c.instructions ??= await instructions(Boolean(tools));
+			mkdirSync(chats(), { recursive: true });
+			const { text, session } = await ask(by, prompt, {
 				instructions: c.instructions,
 				model: c.model,
 				// fm's transcript file starts the conversation when it doesn't exist yet.
 				session: by === 'fm' ? transcript(c.id) : c.session,
 				mode: 'chat',
 				cwd: chats(),
-				ontext: (text) => (reply.text = text)
+				tools,
+				ontext: (text) => (reply.text = text),
+				onstep: (step) => (chat.step = step)
 			});
 			c.session = session;
+			// The whole reply, when it came only at the end (no streamed chunks).
+			if (text) reply.text = text;
 		} catch (e) {
 			reply.text = (e as Error).message;
 			reply.error = true;
@@ -144,6 +154,7 @@
 			chat.list = [c, ...chat.list.filter((d) => d !== c)];
 			write(c);
 			chat.busy = false;
+			chat.step = '';
 		}
 	}
 
@@ -215,7 +226,19 @@
 					{:else}
 						<div class="hint">Ask about your notifications: what needs your review, what changed today, which PRs are bob’s.</div>
 					{/each}
-					{#if chat.busy}<div class="hint" testId="chat-busy">Thinking…</div>{/if}
+					{#if confirm.request}
+						<!-- A change the agent asked for through the board's tools; nothing happens until Confirm. -->
+						<div class="confirm" testId="chat-confirm-box">
+							<div class="label">{confirm.request.text}</div>
+							{#each confirm.request.titles.slice(0, 8) as title, i (i)}<div class="hint">{title}</div>{/each}
+							{#if confirm.request.titles.length > 8}<div class="hint">and {confirm.request.titles.length - 8} more</div>{/if}
+							<div class="choices">
+								<div class="btn primary" hitbox="self" testId="chat-confirm" tabindex={0} onclick={() => confirm.request?.answer(true)}>Confirm</div>
+								<div class="btn" hitbox="self" testId="chat-cancel" tabindex={0} onclick={() => confirm.request?.answer(false)}>Cancel</div>
+							</div>
+						</div>
+					{/if}
+					{#if chat.busy}<div class="hint" testId="chat-busy">{chat.step ? `Using ${chat.step}…` : 'Thinking…'}</div>{/if}
 				</Scroller>
 				<div class="composer">
 					<textarea
@@ -399,6 +422,26 @@
 	}
 	.btn:hover {
 		background-color: var(--thumb);
+	}
+	.btn.primary {
+		background-color: var(--accent);
+		color: var(--bg);
+	}
+	.confirm {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		max-width: 85%;
+		padding: 12px 14px;
+		border-radius: 10px;
+		border-width: 1px;
+		border-color: var(--accent);
+		background-color: var(--surface);
+	}
+	.choices {
+		display: flex;
+		gap: 8px;
+		padding-top: 6px;
 	}
 	.btn:focus-visible {
 		outline-width: 2px;
