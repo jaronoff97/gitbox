@@ -151,11 +151,21 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
 - `src/agents.ts` — who answers, picked in Settings → Models for Chat and for Whiteboard drafts,
   with an optional model: Apple's `fm`, Claude Code (`claude -p`, stream-json) or Codex
   (`codex exec --json`), whichever are on PATH. `ask()` is one turn and returns the session that
-  continues it (fm's is the transcript file). A chat runs Claude with `--safe-mode`, no tools and the
-  instructions as the system prompt; Codex gets them in its first prompt, read-only. A Whiteboard
+  continues it (fm's is the transcript file). A chat runs Claude with none of the user's settings, no built-in tools, the
+  board's tools and the instructions as the system prompt; Codex gets them in its first prompt, read-only. A Whiteboard
   draft runs the agent in the PR's checkout with `--permission-mode dontAsk` and only Whiteboard's
   MCP tools, file reads, `git diff/log/show` and `gh pr view/diff`. A chat keeps the agent and
   model it started with. The test has fake `claude` and `codex` CLIs.
+- `src/mcp.ts`, `src/tools.svelte.ts` — the board's tools for the agent behind Chat: a small MCP
+  server inside gitbox (JSON-RPC over HTTP on 127.0.0.1, a random token in its URL, started on the
+  first agent chat) with `list_notifications` (board filters, a lane, `all` loads every page),
+  `filter_board`, `select` and `act` (read, done, unsubscribe, close, reopen, open). Board.svelte
+  hands its items and actions to `board.current` while mounted; `act` runs the board's own action,
+  so cards, toasts and progress behave as for a click, and it waits for the user's Confirm in the
+  chat (`confirm`). Claude gets the server through `--mcp-config` with `--setting-sources ''`
+  (`--safe-mode` would drop it) and only `mcp__gitbox` allowed; Codex through
+  `-c mcp_servers.gitbox.url`; fm can't call tools. The test's fake `claude` calls the server as a
+  real MCP client.
 - `src/ago.ts` — "now", "5m", "3h", "2d", then a date: cards, automation activity and chats.
 - `src/settings.svelte.ts` — the user's settings: reactive, saved on every `update`, and read by
   `init()` when `App` mounts.

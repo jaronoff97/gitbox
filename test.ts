@@ -180,7 +180,22 @@ const args = process.argv.slice(2);
 const input = fs.readFileSync(0, 'utf8');
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'claude', args, stdin: input, cwd: process.cwd() }) + '\\n');
 const out = (e) => console.log(JSON.stringify({ ...e, session_id: 'claude-1' }));
-if (args.includes('--allowedTools')) {
+if (args.includes('--mcp-config') && input === 'tidy') {
+	// The board's tools, through gitbox's MCP server, as a real client calls them: bob's first two
+	// cards in Todo, then done on them, which waits for the user. The reply is act's answer.
+	(async () => {
+		const url = JSON.parse(args[args.indexOf('--mcp-config') + 1]).mcpServers.gitbox.url;
+		let id = 0;
+		const rpc = async (method, params) => (await (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) })).json()).result;
+		await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake', version: '1' } });
+		const tools = (await rpc('tools/list', {})).tools.map((t) => t.name);
+		const listed = JSON.parse((await rpc('tools/call', { name: 'list_notifications', arguments: { filters: [{ field: 'author', value: 'bob' }], lane: 'todo', limit: 2 } })).content[0].text);
+		fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cmd: 'mcp', tools, listed }) + '\\n');
+		out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__gitbox__act' }] } });
+		const done = (await rpc('tools/call', { name: 'act', arguments: { action: 'done', ids: listed.notifications.map((n) => n.id) } })).content[0].text;
+		out({ type: 'result', subtype: 'success', is_error: false, result: done });
+	})();
+} else if (args.includes('--allowedTools') && !args.includes('--mcp-config')) {
 	out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__plugin_whiteboard_whiteboard__session_edit' }] } });
 	out({ type: 'result', subtype: 'success', is_error: false, result: 'Done.' });
 } else {
@@ -1089,12 +1104,45 @@ check('the header names the agent, its model and where the words go', has('Claud
 await say('h e l l o', 'Claude says hello');
 const first_claude = agent_calls('claude')[0].args;
 check(
-  'a Claude chat has its model, no tools, and the instructions as its system prompt',
-  first_claude.includes('--safe-mode') && first_claude[first_claude.indexOf('--model') + 1] === 'haiku' &&
+  'a Claude chat has its model, none of the user’s settings, no built-in tools, and the instructions as its system prompt',
+  first_claude.includes('--strict-mcp-config') && first_claude[first_claude.indexOf('--setting-sources') + 1] === '' && first_claude[first_claude.indexOf('--model') + 1] === 'haiku' &&
   first_claude[first_claude.indexOf('--tools') + 1] === '' && first_claude[first_claude.indexOf('--system-prompt') + 1].includes('The user is octocat')
 );
 await say('m o r e', 'Claude says more again');
 check('its next turn resumes Claude’s session', agent_calls('claude')[1].args.join(' ').includes('--resume claude-1'));
+check(
+  'a Claude chat gets the board’s tools through gitbox’s MCP server, and only those',
+  first_claude[first_claude.indexOf('--allowedTools') + 1] === 'mcp__gitbox' && first_claude.includes('dontAsk') &&
+  first_claude[first_claude.indexOf('--system-prompt') + 1].includes('your gitbox tools')
+);
+// The board's tools (src/tools.svelte.ts): Claude lists bob's cards in Todo and asks to mark two as
+// done. Nothing changes until Confirm: Cancel tells Claude so; Confirm marks them done on the board.
+const deleted = () => calls().filter((c) => c.cmd === 'api -X DELETE notifications/threads/2' || c.cmd === 'api -X DELETE notifications/threads/6').length;
+const deleted_before = deleted();
+click_test_id('chat-input');
+type('t i d y');
+press('enter');
+await wait_for(() => !!find_test_id('chat-confirm-box'), { label: 'the agent asks to confirm' });
+if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-confirm.png'));
+const mcp_log = calls().find((c) => c.cmd === 'mcp') as unknown as { tools: string[]; listed: { total: number; notifications: { id: string; lane: string; author: string }[] } };
+check(
+  'the agent sees the board’s tools and lists the cards that match its filters',
+  mcp_log.tools.join() === 'list_notifications,filter_board,select,act' &&
+  mcp_log.listed.notifications.map((n) => n.id).join() === '2,6' && mcp_log.listed.notifications.every((n) => n.lane === 'todo' && n.author === 'bob')
+);
+check('the chat asks first, naming the cards', has('Mark as done 2 notifications?') && has('octo/repo #2: Note 2') && deleted() === deleted_before);
+click_test_id('chat-cancel');
+await wait_for(() => replies().includes('The user declined. Nothing changed.'), { label: 'Cancel' });
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+check('Cancel changes nothing, and the agent hears so', deleted() === deleted_before);
+click_test_id('chat-input');
+type('t i d y');
+press('enter');
+await wait_for(() => !!find_test_id('chat-confirm'), { label: 'the agent asks again' });
+click_test_id('chat-confirm');
+await wait_for(() => replies().includes('Done: mark as done 2.'), { label: 'Confirm' });
+await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
+check('Confirm marks them done on GitHub and on the board', deleted() === deleted_before + 2 && !find_test_id('card-2') && !find_test_id('card-6'));
 const claude_chat = saved_chats().find((c) => c.title === 'hello')!;
 update({ chat_agent: 'codex', chat_model: '' });
 click_test_id('chat-new');
@@ -1111,7 +1159,7 @@ await wait_for(() => !find_test_id('chat-busy'), { label: 'the turn ends' });
 click_test_id(`chat-${claude_chat.id}`);
 pump();
 await say('b a c k', 'Claude says back again');
-check('a chat keeps the agent it started with', agent_calls('claude').length === 3 && agent_calls('codex').length === 3);
+check('a chat keeps the agent it started with', agent_calls('claude').length === 5 && agent_calls('codex').length === 3);
 update({ chat_agent: 'fm', chat_model: '' });
 press('ctrl-1');
 
@@ -1240,4 +1288,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 149);
+finish('gitbox', 154);
