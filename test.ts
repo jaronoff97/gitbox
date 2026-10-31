@@ -261,7 +261,7 @@ async function scroll_lane(key: string, steps = 10) {
   pump();
 }
 
-let app = mount_headless(App, { width: 1470, height: 800 });
+let app = mount_headless(App, { width: 1024, height: 642 });
 
 await wait_for(() => text().includes('gh auth login'), { label: 'sign-in hint' });
 check('a signed-out gh shows the login hint', text().includes('not logged in'));
@@ -380,9 +380,63 @@ check(
 check('a sort changes only its own lane', has('Note 2') && has('Note 4'));
 check('the sort is saved', saved().settings.lane_sort.waiting === 'asc');
 
+/** The test window is GitHub's macOS runner's: its screen holds 1024×642, and a headless window is
+ * no bigger than the screen. Scrolls card `id`'s lane until the card is inside the window and above
+ * the bottom 90 px, where the selection bar and the toasts are. A lane mounts only the rows near what
+ * it shows, so a card that isn't mounted is above (where earlier scrolls left it) and the lane goes up;
+ * its lane is then the fake data's (note i: i % 4). */
+async function into_view(id: number) {
+  const fallback = ['requested', 'waiting', 'todo', 'done'][id % 4];
+  for (let k = 0; k < 30; k++) {
+    // One walk of the tree for the card and the lanes: each find_test_id serializes the whole tree.
+    const nodes = find_all((n) => n.testId === `card-${id}` || /^lane-(todo|requested|waiting|done)$/.test(n.testId ?? ''));
+    const card = nodes.find((n) => n.testId === `card-${id}`);
+    const b = card ? bounds(card) : null;
+    const lanes = nodes.filter((n) => n !== card).map((n) => ({ key: n.testId!.slice(5), box: bounds(n) }));
+    const lane = (b && lanes.find((l) => l.box && b.x >= l.box.x && b.x + b.width <= l.box.x + l.box.width)) || lanes.find((l) => l.key === fallback);
+    if (!lane?.box) return;
+    const bottom = Math.min(642 - 90, lane.box.y + lane.box.height);
+    if (b && b.y >= lane.box.y + 30 && b.y + Math.min(b.height, 60) <= bottom) return;
+    wheel({ x: lane.box.x + lane.box.width / 2, y: Math.min(lane.box.y + lane.box.height / 2, 321) }, 0, !b || b.y < lane.box.y + 30 ? 200 : -200);
+    await wait(30);
+    pump();
+  }
+}
+/** Clicks `id` after scrolling what holds it (under its x, mid-window) until it is inside the window:
+ * a dialog or an editor taller than the runner's 642 px. */
+async function reveal_click(id: string, opts?: Parameters<typeof click_test_id>[1]) {
+  for (let k = 0; k < 40; k++) {
+    const b = bounds(find_test_id(id)!)!;
+    if (b.y >= 56 && b.y + b.height <= 642 - 4) break;
+    wheel({ x: b.x + b.width / 2, y: 321 }, 0, b.y < 56 ? 120 : -120);
+    await wait(30);
+    pump();
+  }
+  click_test_id(id, opts);
+}
+
+/** Clicks card `id` once it is in view and no toast covers its centre: in the runner's narrow
+ * window, the toasts' column covers the middle lanes for a few seconds after an action. */
+async function card_click(id: number, opts?: Parameters<typeof click_test_id>[1]) {
+  await into_view(id);
+  await wait_for(
+    () => {
+      const nodes = find_all((n) => n.testId === `card-${id}` || n.testId === 'toast' || n.testId === 'toast-open');
+      const card = nodes.find((n) => n.testId === `card-${id}`);
+      const b = card && bounds(card);
+      if (!b) return true;
+      const x = b.x + b.width / 2;
+      const y = b.y + b.height / 2;
+      return !nodes.some((n) => n !== card && ((t) => t && x >= t.x && x <= t.x + t.width && y >= t.y && y <= t.y + t.height)(bounds(n)));
+    },
+    { timeout: 9000, label: `no toast over card ${id}` }
+  );
+  click_test_id(`card-${id}`, opts);
+}
+
 // Card actions (#2): a right click opens the menu at the card.
 const right_click = async (id: number) => {
-  click_test_id(`card-${id}`, { button: 2 });
+  await card_click(id, { button: 2 });
   await wait_for(() => has('Mark as Done'), { label: `the menu of card ${id}` });
 };
 await right_click(4);
@@ -436,7 +490,7 @@ check('a closed PR moves to Merged / Closed', in_lane(16, 'done'));
 await right_click(16);
 check('a closed PR offers Reopen', has('Reopen pull request') && !has('Close pull request…'));
 click_test_id('menu-reopen');
-await wait_for(() => called('pr reopen https://github.com/octo/repo/pull/16') && in_lane(16, 'requested'), { label: 'reopen' });
+await wait_for(() => called('pr reopen https://github.com/octo/repo/pull/16') && in_lane(16, 'requested') && has('Reopened'), { label: 'reopen' });
 click(find_test_id('toast-open', { last: true })!);
 await wait_for(() => called('open https://github.com/octo/repo/pull/16'), { label: 'a click on the toast' });
 check('a click on the toast opens its page', called('open https://github.com/octo/repo/pull/16'));
@@ -463,16 +517,19 @@ await wait_for(() => called('open https://github.com/octo/repo/pull/4#issuecomme
 check('⌘↩ after a comment opens the new comment', called('open https://github.com/octo/repo/pull/4#issuecomment-1'));
 
 // Multi-select (#3): ⌘-click toggles, ⇧-click adds a range in the lane, and a plain click still opens.
+// In the runner's narrow window, the toasts' column covers the middle lanes, so they go first.
+await wait_for(() => !find_test_id('toast') && !find_test_id('toast-open'), { timeout: 9000, label: 'the toasts go' });
 const opened = () => calls().filter((c) => c.cmd.startsWith('open ')).length;
 const before_select = opened();
-click_test_id('card-6', { modifiers: 'cmd' });
+await card_click(6, { modifiers: 'cmd' });
 await wait_for(() => has('1 selected'), { label: 'a ⌘-click selects' });
-click_test_id('card-4', { modifiers: 'cmd' });
-click_test_id('card-28', { modifiers: 'shift' });
+await card_click(4, { modifiers: 'cmd' });
+await card_click(28, { modifiers: 'shift' });
 await wait_for(() => has('5 selected'), { label: 'a ⇧-click range' });
 check('⇧-click selects the range in the lane order', has('4 selected') && has('5 selected'));
-click_test_id('card-16', { modifiers: 'cmd' });
-await wait_for(() => has('4 selected'), { label: 'a ⌘-click deselects' });
+await card_click(16, { modifiers: 'cmd' });
+// Requested's own count and the bar's: 3 in the lane, 4 in all.
+await wait_for(() => has('3 selected') && has('4 selected') && !has('5 selected'), { label: 'a ⌘-click deselects' });
 check('selecting opens nothing', opened() === before_select);
 
 await scroll_lane('requested', 3);
@@ -485,7 +542,7 @@ for (let k = 0; k < 6; k++) {
 await wait_for(() => find_test_id('card-4') !== null, { label: 'back at the top of Requested' });
 
 // A right click on a selected card acts on the whole selection; thread 12 refuses to be done.
-click_test_id('card-12', { button: 2 });
+await card_click(12, { button: 2 });
 await wait_for(() => has('Mark 4 as Done'), { label: 'the menu for the selection' });
 click_test_id('menu-done');
 await wait_for(() => text().includes('1 of 4 failed: HTTP 403: Forbidden'), { label: 'a bulk done with one failure' });
@@ -501,15 +558,15 @@ press('escape');
 await wait_for(() => !has('1 selected'), { label: 'Escape clears the selection' });
 
 // Close needs open PRs or issues: a merged PR in the selection disables it.
-click_test_id('card-3', { modifiers: 'cmd' });
-click_test_id('card-32', { modifiers: 'cmd' });
+await card_click(3, { modifiers: 'cmd' });
+await card_click(32, { modifiers: 'cmd' });
 await wait_for(() => has('2 selected'), { label: 'a merged and an open PR' });
 click_test_id('bulk-close');
 await wait(100);
 check('Close is disabled while the selection has a merged PR', !has('Close 2 pull requests?'));
 click_test_id('bulk-clear');
-click_test_id('card-32', { modifiers: 'cmd' });
-click_test_id('card-36', { modifiers: 'cmd' });
+await card_click(32, { modifiers: 'cmd' });
+await card_click(36, { modifiers: 'cmd' });
 await wait_for(() => has('2 selected'), { label: 'two open PRs' });
 click_test_id('bulk-close');
 await wait_for(() => has('Close 2 pull requests?'), { label: 'the bulk close confirmation' });
@@ -521,8 +578,8 @@ await wait_for(() => !has('2 selected'), { label: 'the bulk close finishes' });
 await wait_for(() => !in_lane(32, 'requested') && !in_lane(36, 'requested'), { label: 'closed PRs leave Requested' });
 check('a bulk close closes each PR and clears the selection', !has('2 selected'));
 
-click_test_id('card-10', { modifiers: 'cmd' });
-click_test_id('card-14', { modifiers: 'cmd' });
+await card_click(10, { modifiers: 'cmd' });
+await card_click(14, { modifiers: 'cmd' });
 await wait_for(() => has('2 selected'), { label: 'two todo cards' });
 click_test_id('bulk-copy');
 await wait_for(() => text().includes('Copied 2 links'), { label: 'copy links' });
@@ -534,8 +591,8 @@ click_test_id('bulk-clear');
 
 // Progress: with each call 400 ms, the bar counts them as they come back.
 process.env.FAKE_SLOW = '1';
-click_test_id('card-10', { modifiers: 'cmd' });
-click_test_id('card-14', { modifiers: 'cmd' });
+await card_click(10, { modifiers: 'cmd' });
+await card_click(14, { modifiers: 'cmd' });
 await wait_for(() => has('2 selected'), { label: 'two todo cards again' });
 click_test_id('bulk-done');
 await wait_for(() => text().includes('Marking 2 as done… 0/2'), { label: 'the bar shows progress' });
@@ -870,7 +927,7 @@ press('escape');
 await wait_for(() => !dialog_open(), { label: 'Escape closes settings again' });
 
 await app.unmount();
-app = mount_headless(App, { width: 1470, height: 800 });
+app = mount_headless(App, { width: 1024, height: 642 });
 await wait_for(() => has('Note 2'), { label: 'the board after a restart' });
 check('a restart skips onboarding', !text().includes('Welcome to gitbox'));
 // With lanes of 25, the start alone loads one batch; oldest first has to load the last page too.
@@ -910,7 +967,7 @@ const loads_at_refresh = loads();
 click_test_id('refresh');
 await wait_for(() => has('Refreshing inbox'), { label: 'the refresh popup' });
 if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-job.png'));
-check('a refresh shows its progress in the corner', has('Starting…') && (bounds(find_test_id('job')!)?.x ?? 0) > 1100);
+check('a refresh shows its progress in the corner', has('Starting…') && (({ x, width }) => x + width > 1024 - 30)(bounds(find_test_id('job')!) ?? { x: 0, width: 0 }));
 click_test_id('refresh');
 press('cmd-r');
 await wait_for(() => !find_test_id('job'), { timeout: 8000, label: 'the refresh ends' });
@@ -940,23 +997,23 @@ const automations_json = () => JSON.parse(readFileSync(join(process.env.XDG_CONF
 click_test_id('nav-automations');
 click_test_id('new-automation');
 pump();
-click_test_id('automation-name');
+await reveal_click('automation-name');
 type('b o b');
-click_test_id('add-condition');
+await reveal_click('add-condition');
 pump();
-click_test_id('cond-value-1');
+await reveal_click('cond-value-1');
 type('b o b');
-click_test_id('add-condition');
+await reveal_click('add-condition');
 pump();
-click_test_id('cond-field-2');
+await reveal_click('cond-field-2');
 pump();
-click_test_id('cond-pick-org');
+await reveal_click('cond-pick-org');
 pump();
-click_test_id('cond-value-2');
+await reveal_click('cond-value-2');
 type('shift-o c t o');
-click_test_id('step-done');
+await reveal_click('step-done');
 if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-editor.png'));
-click_test_id('automation-save');
+await reveal_click('automation-save');
 pump();
 const made = automations_json()[0];
 check(
@@ -993,22 +1050,22 @@ if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-list.png'));
 
 click_test_id(`automation-${made.id}`);
 pump();
-click_test_id('automation-enabled');
-click_test_id('automation-save');
+await reveal_click('automation-enabled');
+await reveal_click('automation-save');
 pump();
 check('a change is saved', automations_json()[0].enabled === false);
 click_test_id(`automation-${made.id}`);
 pump();
-click_test_id('automation-delete');
+await reveal_click('automation-delete');
 pump();
 check('Delete removes it', automations_json().length === 0 && has('No automations yet. Make one to approve, read or clear notifications as they arrive.'));
 click_test_id('new-automation');
 pump();
-click_test_id('cond-remove-0');
-click_test_id('automation-save');
+await reveal_click('cond-remove-0');
+await reveal_click('automation-save');
 pump();
 check('an automation needs a condition', text().includes('Add a condition') && automations_json().length === 0);
-click_test_id('automation-cancel');
+await reveal_click('automation-cancel');
 press('ctrl-1');
 
 // Chat: Apple's on-device model through fm. The first turn starts the transcript with the user and
@@ -1222,7 +1279,7 @@ check(
   contents.at(-1)?.title === 'What to check' && contents.at(-1)?.children?.[0].markdown === '- Check A.\n- Check B.'
 );
 check('the draft ends its activity', wb().some((c) => c.cmd === 'whiteboard api session_activity_end'));
-click_test_id('card-4');
+await card_click(4);
 press('w');
 await wait_for(() => has('Opened the pull request’s Whiteboard'), { label: 'w opens the board again' });
 check(

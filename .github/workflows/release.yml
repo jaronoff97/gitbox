@@ -7,7 +7,9 @@
 # release-please-config.json and .release-please-manifest.json.
 #
 # Run it by hand (Actions → release → Run workflow, or `gh workflow run release.yml`) for a dry run:
-# the same build, with the .dmg kept as a run artifact and no release.
+# the same build, with the .dmg kept as a run artifact and no release. With a `tag` (an existing
+# release, such as v0.2.0: `gh workflow run release.yml -f tag=v0.2.0`), it builds that tag and
+# attaches the .dmg to its release, for a release whose build failed.
 #
 # The app is signed ad hoc unless the CODESIGN_IDENTITY / NOTARY_PROFILE setup in build.ts is added
 # here (a certificate imported into the runner's keychain, and a notarytool profile).
@@ -17,6 +19,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing release (vX.Y.Z) to build from its tag and attach the .dmg to; empty is a dry run
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -43,14 +50,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name || github.ref }}
+          ref: ${{ needs.release-please.outputs.tag_name || inputs.tag || github.ref }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
       - name: Check the tag matches package.json
-        if: needs.release-please.outputs.release_created == 'true'
+        if: needs.release-please.outputs.release_created == 'true' || inputs.tag != ''
         env:
-          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
         run: |
           version="v$(bun -e 'console.log(require("./package.json").version)')"
           if [ "$version" != "$TAG" ]; then
@@ -59,18 +66,21 @@ jobs:
           fi
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      # A release built by hand from its tag skips the test: test.yml ran it on main, and the tag's own
+      # test.ts can be older (v0.2.0's asked for a bigger window than the runner has).
       - run: bun run test
+        if: inputs.tag == ''
       - run: bun run build
       - name: Keep the .dmg (dry run)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.tag == ''
         uses: actions/upload-artifact@v4
         with:
           name: gitbox-dmg
           path: dist/*.dmg
           retention-days: 7
       - name: Attach the .dmg to the release
-        if: needs.release-please.outputs.release_created == 'true'
+        if: needs.release-please.outputs.release_created == 'true' || inputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
         run: gh release upload "$TAG" dist/*.dmg --clobber
