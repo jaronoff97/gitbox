@@ -1,0 +1,28 @@
+# The typecheck and the headless test (test.ts) on every pull request and every push to main, on the
+# runner the release builds on. Its screen holds a 1024×642 window, and test.ts asks for that size,
+# so a test passes here as it does on a Mac with a bigger screen.
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
