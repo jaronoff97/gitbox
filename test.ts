@@ -415,9 +415,22 @@ async function reveal_click(id: string, opts?: Parameters<typeof click_test_id>[
   click_test_id(id, opts);
 }
 
-/** Clicks card `id` once it is in view. */
+/** Clicks card `id` once it is in view and no toast covers its centre: in the runner's narrow
+ * window, the toasts' column covers the middle lanes for a few seconds after an action. */
 async function card_click(id: number, opts?: Parameters<typeof click_test_id>[1]) {
   await into_view(id);
+  await wait_for(
+    () => {
+      const nodes = find_all((n) => n.testId === `card-${id}` || n.testId === 'toast' || n.testId === 'toast-open');
+      const card = nodes.find((n) => n.testId === `card-${id}`);
+      const b = card && bounds(card);
+      if (!b) return true;
+      const x = b.x + b.width / 2;
+      const y = b.y + b.height / 2;
+      return !nodes.some((n) => n !== card && ((t) => t && x >= t.x && x <= t.x + t.width && y >= t.y && y <= t.y + t.height)(bounds(n)));
+    },
+    { timeout: 9000, label: `no toast over card ${id}` }
+  );
   click_test_id(`card-${id}`, opts);
 }
 
