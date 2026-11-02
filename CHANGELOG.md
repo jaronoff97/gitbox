@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/jaronoff97/gitbox/compare/v0.3.0...v0.3.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **security:** keep a PR's text from running code through an agent or a link ([#42](https://github.com/jaronoff97/gitbox/issues/42)) ([ed7d0f6](https://github.com/jaronoff97/gitbox/commit/ed7d0f69cdb01b929dd0fe32b2e68d1bde8fdf9c))
+
 ## [0.3.0](https://github.com/jaronoff97/gitbox/compare/v0.2.1...v0.3.0) (2026-11-02)
 
 
