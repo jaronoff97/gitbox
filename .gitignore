@@ -4,3 +4,6 @@ dist
 .task
 .hermit
 *.bun-build
+
+# Bun before 1.2 writes this binary lockfile; the project uses bun.lock (Bun >= 1.4).
+bun.lockb
