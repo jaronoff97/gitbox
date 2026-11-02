@@ -158,7 +158,9 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   case doesn't matter) and steps (approve, read, done, unsubscribe, notify, in that order). An
   automation needs a condition unless its one step is the notification; such a notify-only one acts
   again when a thread has new activity (`updated_at` in the log). A check rings at most 5 times, then
-  once for the rest. "Notify me of every notification" is added once (`notify_seeded`), on. `watch()`, from
+  once for the rest. "Notify me of every notification" is added once (`notify_seeded`), on. An
+  automation's `group_by` (any filter field; the repository when unset) is what its notifications
+  stack by in Notification Center: `group_of` gives the field's first value, or "no …". `watch()`, from
   `App.svelte` once onboarded, fetches the first unread page every minute and runs each enabled
   automation on what it matches, once per thread and only on threads updated after it was made.
   Each run goes to `automation_log`, which is also what stops a second run.
