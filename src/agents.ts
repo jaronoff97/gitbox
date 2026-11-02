@@ -36,6 +36,8 @@ export type Turn = {
 	 * MCP server, which the agent has connected. */
 	mode: 'chat' | 'whiteboard';
 	cwd?: string;
+	/** Folders besides `cwd` that a Whiteboard draft may read (the PR's diff and description). */
+	dirs?: string[];
 	/** In a chat: the URL of gitbox's MCP server (src/mcp.ts), whose board tools the agent may use. */
 	tools?: string;
 	/** The reply so far, as it streams. */
@@ -79,21 +81,13 @@ function events(command: string, args: string[], input: string, cwd: string | un
 	});
 }
 
-/** The tools Claude may use on a Whiteboard: Whiteboard's MCP server (as the plugin, or added by
- * hand), reading the checkout and its git history, and the PR through gh. Nothing that writes code. */
-const WHITEBOARD_TOOLS = [
-	'mcp__plugin_whiteboard_whiteboard',
-	'mcp__whiteboard',
-	'Read',
-	'Grep',
-	'Glob',
-	'Task',
-	'Bash(git diff:*)',
-	'Bash(git log:*)',
-	'Bash(git show:*)',
-	'Bash(gh pr view:*)',
-	'Bash(gh pr diff:*)'
-];
+/** A Whiteboard draft reads a PR that anyone may have written, so the agent gets no way to run
+ * anything: `--restricted` removes Bash, PowerShell and WebFetch, ignores the user's settings (and so
+ * their plugins), and keeps the file tools inside the checkout and `dirs`. Whiteboard's MCP server is
+ * then named here. (`Bash(git diff:*)` was not safe: `git diff --output=<path>` writes a file, and
+ * `git log --format=%B --output=…` writes a commit message, which the PR's author chose.) */
+const WHITEBOARD_MCP = JSON.stringify({ mcpServers: { whiteboard: { command: 'whiteboard', args: ['mcp'] } } });
+const WHITEBOARD_TOOLS = ['mcp__whiteboard', 'Read', 'Grep', 'Glob'];
 
 async function claude(prompt: string, turn: Turn) {
 	const args = [
@@ -120,7 +114,17 @@ async function claude(prompt: string, turn: Turn) {
 						? ['--mcp-config', JSON.stringify({ mcpServers: { gitbox: { type: 'http', url: turn.tools } } }), '--permission-mode', 'dontAsk', '--allowedTools', 'mcp__gitbox']
 						: [])
 				]
-			: ['--permission-mode', 'dontAsk', '--allowedTools', ...WHITEBOARD_TOOLS])
+			: [
+					'--restricted',
+					'--strict-mcp-config',
+					'--mcp-config',
+					WHITEBOARD_MCP,
+					'--permission-mode',
+					'dontAsk',
+					...(turn.dirs ?? []).flatMap((d) => ['--add-dir', d]),
+					'--allowedTools',
+					...WHITEBOARD_TOOLS
+				])
 	];
 	let session = turn.session ?? '';
 	let text = '';
