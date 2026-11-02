@@ -23,6 +23,8 @@
 	/** The condition whose field menu is open. */
 	let picking = $state<number | null>(null);
 	let problem = $state('');
+	/** The notification step's Group by menu is open. */
+	let picking_group = $state(false);
 
 	const is_new = $derived(draft !== null && !automations.list.some((a) => a.id === draft!.id));
 	const pressed = (e: GpuixEvent) => e.key === 'space' || e.key === 'enter';
@@ -181,6 +183,34 @@
 							{@render switch_(draft.then.includes(s.key), () => toggle_step(s.key), `step-${s.key}`)}
 							<div class="label">{s.title}</div>
 						</div>
+						{#if s.key === 'notify' && draft.then.includes('notify')}
+							<!-- Notification Center stacks the notifications that share this field's value. -->
+							<div class="cond indent">
+								<div class="is">Group by</div>
+								<Popover open={picking_group} onclose={() => (picking_group = false)} testid="group-menu" style="padding: 6px">
+									<div class="pick" hitbox="self" testId="group-by" tabindex={0} onclick={() => (picking_group = !picking_group)}>
+										<div>{field(draft.group_by ?? 'repo').title}</div>
+										<svg class="chev" source={chevron}></svg>
+									</div>
+									{#snippet content()}
+										<div class="menu">
+											{#each FIELDS as f (f.key)}
+												<div
+													class="menu-item"
+													testId="group-pick-{f.key}"
+													onclick={() => {
+														draft!.group_by = f.key;
+														picking_group = false;
+													}}
+												>
+													{f.title}
+												</div>
+											{/each}
+										</div>
+									{/snippet}
+								</Popover>
+							</div>
+						{/if}
 					{/each}
 
 					<div class="step">
@@ -358,6 +388,9 @@
 	}
 	.actions {
 		padding-top: 10px;
+	}
+	.indent {
+		padding-left: 44px;
 	}
 	.row-start {
 		display: flex;

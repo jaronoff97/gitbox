@@ -2,7 +2,7 @@
 // automations.json beside state.json and checked every minute against the newest unread notifications.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { untrack } from 'svelte';
-import { field, matches, words, type Filter } from './filters.ts';
+import { field, matches, words, type Field, type Filter } from './filters.ts';
 import * as gh from './gh.ts';
 import type { Notification } from './gh.ts';
 import { track } from './jobs.svelte.ts';
@@ -19,6 +19,9 @@ export type Automation = {
 	when: Filter[];
 	/** In this order; a step that fails stops the rest. */
 	then: Step[];
+	/** What a notification step stacks its notifications by in Notification Center, any field a
+	 * condition can use (the repository when unset). */
+	group_by?: Field;
 	/** ISO time it was made. It acts only on notifications updated after, so saving one doesn't approve
 	 * a backlog. */
 	created: string;
@@ -27,8 +30,15 @@ export type Automation = {
 /** One automation acting on one thread, at its `updated_at` then. */
 export type Run = { automation: string; thread: string; title: string; url: string | null; at: string; updated_at?: string; error?: string };
 
-/** A notification for `n` (#35): "octo/repo #4", the reason, and the title; a click opens its page. */
-async function notify_of(n: Notification) {
+/** What `n` stacks under when grouped by `key`: the field's first value ("no label" when it has none). */
+export function group_of(n: Notification, key: Field) {
+	const f = field(key);
+	return `${key}:${f.values(n)[0] ?? `no ${f.title.toLowerCase()}`}`;
+}
+
+/** A notification for `n` (#35): "octo/repo #4", the reason, and the title; a click opens its page.
+ * It stacks with the others of the same `group_by` value. */
+async function notify_of(n: Notification, a: Automation) {
 	const num = gh.number(n);
 	const reason = words(n.reason);
 	await notify({
@@ -36,12 +46,12 @@ async function notify_of(n: Notification) {
 		title: `${n.repository.full_name}${num && gh.web_url(n.subject.url) ? ` #${num}` : ''}`,
 		subtitle: reason.charAt(0).toUpperCase() + reason.slice(1),
 		body: n.subject.title,
-		group: n.repository.full_name,
+		group: group_of(n, a.group_by ?? 'repo'),
 		url: await gh.link(n)
 	});
 }
 
-export const STEPS: { key: Step; title: string; run: (n: Notification) => Promise<unknown> }[] = [
+export const STEPS: { key: Step; title: string; run: (n: Notification, a: Automation) => Promise<unknown> }[] = [
 	{ key: 'approve', title: 'Approve the pull request', run: gh.approve },
 	{ key: 'read', title: 'Mark as read', run: gh.mark_read },
 	{ key: 'done', title: 'Mark as done', run: gh.mark_done },
@@ -104,7 +114,10 @@ export function remove(id: string) {
 export function describe(a: Automation) {
 	const fields = [...Map.groupBy(a.when, (f) => f.field)].map(([key, list]) => `${field(key).title.toLowerCase()} is ${list.map((f) => f.value).join(' or ')}`);
 	// Only the first letter: "send a macOS notification".
-	const steps = a.then.map((s) => STEPS.find((x) => x.key === s)!.title.replace(/^./, (c) => c.toLowerCase()));
+	const steps = a.then.map((s) => {
+		const title = STEPS.find((x) => x.key === s)!.title.replace(/^./, (c) => c.toLowerCase());
+		return s === 'notify' && a.group_by && a.group_by !== 'repo' ? `${title}, grouped by ${field(a.group_by).title.toLowerCase()}` : title;
+	});
 	return `When ${fields.join(' and ') || 'anything arrives'}, ${steps.join(', then ') || 'do nothing'}.`;
 }
 
@@ -141,7 +154,7 @@ export async function apply(items: Notification[]) {
 						muted++;
 						continue;
 					}
-					await STEPS.find((s) => s.key === step)!.run(n);
+					await STEPS.find((s) => s.key === step)!.run(n, a);
 					if (step === 'notify') rung++;
 				}
 			} catch (e) {

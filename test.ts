@@ -1090,9 +1090,18 @@ check('an automation needs a condition', text().includes('Add a condition') && a
 // …unless its one step is a notification, which can go to every notification (#35).
 await reveal_click('step-approve');
 await reveal_click('step-notify');
+// The notification step stacks by a field a condition can use: the repository, or here the author.
+await reveal_click('group-by');
+pump();
+click_test_id('group-pick-author');
+pump();
 await reveal_click('automation-save');
 pump();
 check('a notification alone needs no condition', automations_json().length === 1 && automations_json()[0].then.join() === 'notify' && automations_json()[0].when.length === 0);
+check(
+  'Group by saves the field, and the list says so',
+  automations_json()[0].group_by === 'author' && has('When anything arrives, send a macOS notification, grouped by author.')
+);
 remove_all();
 
 // macOS notifications (#35), through a fake notifier (the native one needs the app's bundle): a
@@ -1110,9 +1119,20 @@ check(
 );
 await check_automations();
 check('a thread rings once for each update', posts.length === 6);
+check('notifications stack by repository unless told otherwise', posts[0].group === 'repo:octo/repo');
 automations.log = automations.log.map((r) => (r.thread === '3' ? { ...r, updated_at: '2000-01-01T00:00:00.000Z' } : r));
 await check_automations();
 check('new activity on a thread rings again', posts.length === 7 && posts[6].body === 'Note 3');
+// Grouped by label: a card's first label, or "no label".
+put({ id: 'notify-label', name: 'By label', enabled: true, when: [], then: ['notify'], group_by: 'label', created: '2000-01-01T00:00:00.000Z' });
+const before_label = posts.length;
+await check_automations();
+const by_label = posts.slice(before_label);
+check(
+  'grouped by label, a notification stacks by its first label',
+  by_label.find((p) => p.body === 'Note 3')?.group === 'label:bug' && by_label.find((p) => p.body === 'Note 1')?.group === 'label:no label'
+);
+put_remove('notify-label');
 refusal = 'not allowed';
 automations.log = automations.log.filter((r) => r.thread !== '5');
 await check_automations();
@@ -1428,4 +1448,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 166);
+finish('gitbox', 169);
