@@ -116,7 +116,9 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   covers it (`active={false}` hides it with `visibility: hidden` and rests its keys), so its cards
   and scroll survive a switch. `--sidebar` is the sidebar's width; toasts and the selection bar
   centre beside it.
-- `src/gh.ts` — every call to the `gh` CLI, the onboarding checks, and `open_url`. Each page of
+- `src/gh.ts` — every call to the `gh` CLI, the onboarding checks, and `open_url`, which opens
+  http(s) URLs only (a model's link could name a `file:` URL or a custom scheme). `without_images`
+  turns a model's Markdown images into their alt text before it renders. Each page of
   notifications gets its PRs' and issues' state, draft flag, author, labels and reviews from one
   batched GraphQL call (GraphQL has no notifications; `reviewDecision` is left out, as it made a
   page 4 s slower). `gh` runs with Homebrew's directories added to `PATH`, since an app started
@@ -182,8 +184,11 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   (`codex exec --json`), whichever are on PATH. `ask()` is one turn and returns the session that
   continues it (fm's is the transcript file). A chat runs Claude with none of the user's settings, no built-in tools, the
   board's tools and the instructions as the system prompt; Codex gets them in its first prompt, read-only. A Whiteboard
-  draft runs the agent in the PR's checkout with `--permission-mode dontAsk` and only Whiteboard's
-  MCP tools, file reads, `git diff/log/show` and `gh pr view/diff`. A chat keeps the agent and
+  draft reads text that anyone may have written, so Claude runs it with `--restricted` (no Bash,
+  PowerShell or WebFetch; file tools only in the checkout and `--add-dir`), Whiteboard's MCP server
+  named in `--mcp-config`, and only `mcp__whiteboard`, Read, Grep and Glob. Gitbox fetches the PR's
+  diff and description into a temporary folder for it (`git diff --output=…` writes a file, so no
+  git commands). A chat keeps the agent and
   model it started with. The test has fake `claude` and `codex` CLIs.
 - `src/mcp.ts`, `src/tools.svelte.ts` — the board's tools for the agent behind Chat: a small MCP
   server inside gitbox (JSON-RPC over HTTP on 127.0.0.1, a random token in its URL, started on the

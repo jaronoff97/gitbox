@@ -186,11 +186,32 @@ export async function link(n: Notification): Promise<string> {
 }
 
 /** Opens `url` in the default browser. */
-export function open_url(url: string) {
+/** Opens `url` in the default browser: web pages only. A link can come from a model's reply in Chat,
+ * which a PR's title can steer, and `open` would also run a file: URL (a .command file, an app) or a
+ * custom scheme. On Windows, rundll32 rather than `cmd /c start`, whose `&` would run a command.
+ * Returns whether it opened. */
+export function open_url(url: string): boolean {
+	let href: string;
+	try {
+		const u = new URL(url);
+		if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+		href = u.href;
+	} catch {
+		return false;
+	}
 	const [cmd, args]: [string, string[]] =
-		process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]];
+		process.platform === 'darwin'
+			? ['open', [href]]
+			: process.platform === 'win32'
+				? ['rundll32', ['url.dll,FileProtocolHandler', href]]
+				: ['xdg-open', [href]];
 	spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
+	return true;
 }
+
+/** A model's Markdown with its images as their alt text: an image's URL is fetched as it renders, so a
+ * reply steered by a PR's title could send what the model knows to any server. */
+export const without_images = (md: string) => md.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/<img\b[^>]*>/gi, '');
 
 /** Runs `cmd` with `input` on stdin; rejects with stderr on a non-zero exit. */
 function pipe(cmd: string, args: string[], input: string): Promise<string> {
