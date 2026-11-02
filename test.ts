@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { dispatch } from 'gpuix-svelte/renderer';
 import App from './App.svelte';
 import { automations, check as check_automations, put } from './src/automations.svelte.ts';
 import { matches } from './src/filters.ts';
@@ -278,6 +279,19 @@ const badges = (b: string) => all_text().filter((t) => t === b).length;
 await wait_for(() => badges('50+') === 4, { label: 'the first 50 cards of every lane' });
 await wait_for(() => !text().includes('loading…'), { label: 'the start settles' });
 check('a card shows its PR’s number after the repository', has('#4') && has('#1'));
+// A double-click's second click (the one a double-click on the macOS title bar sends to the card
+// under the pointer after the window zooms) opens nothing.
+const opens_of_2 = () => calls().filter((c) => c.cmd === 'open https://github.com/octo/repo/pull/2').length;
+// The window's simulated clicks always count 1, so the second click is sent to the card as macOS
+// sends it (clickCount 2); one with clickCount 1 shows the event reaches the card.
+const card_2 = () => (find_test_id('card-2') as unknown as { id: number }).id;
+click_test_id('card-2');
+await wait_for(() => opens_of_2() === 1, { label: 'the first click opens' });
+dispatch({ elementId: card_2(), eventType: 'click', button: 0, clickCount: 2 });
+await wait(300);
+check('the second click of a double-click opens nothing', opens_of_2() === 1);
+dispatch({ elementId: card_2(), eventType: 'click', button: 0, clickCount: 1 });
+await wait_for(() => opens_of_2() === 2, { label: 'a single click reaches the card' });
 if (process.env.SHOT) screenshot(process.env.SHOT.replace('.png', '-cards.png'));
 check('the board has the four lanes', ['Todo', 'Requested', 'Waiting on me', 'Merged / Closed'].every(has));
 check(
@@ -1356,4 +1370,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 157);
+finish('gitbox', 158);

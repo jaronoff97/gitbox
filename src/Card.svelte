@@ -30,6 +30,9 @@
 
 	/** A plain click opens the card; ⌘ toggles it in the selection, ⇧ selects up to it. */
 	function click(e: GpuixEvent) {
+		// The second click of a double-click: one on the macOS title bar zooms the window, and the
+		// click then lands on whatever card is under the pointer. A card's first click already acted.
+		if (((e as { clickCount?: number }).clickCount ?? 1) > 1) return;
 		onpoint();
 		if (e.modifiers?.cmd) onselect('toggle');
 		else if (e.modifiers?.shift) onselect('range');
