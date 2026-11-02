@@ -1,11 +1,12 @@
 import { all_text, bounds, check, click, click_test_id, drag, find_all, find_test_id, finish, hover, mount_headless, press, pump, screenshot, type, wait, wait_for, wheel } from 'gpuix-svelte/test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dispatch } from 'gpuix-svelte/renderer';
 import App from './App.svelte';
-import { automations, check as check_automations, put } from './src/automations.svelte.ts';
+import { automations, check as check_automations, describe, init as init_automations, put, remove as put_remove } from './src/automations.svelte.ts';
+import { notifier, type Post } from './src/notify.ts';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
 import { link, type Notification } from './src/gh.ts';
@@ -237,6 +238,11 @@ process.env.PATH = `${bin}:${process.env.PATH}`;
 process.env.GITBOX_NO_MENU = '1';
 // The saved state goes to a temp dir, not the real ~/.config/gitbox.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'gitbox-config-'));
+// The ready-made "Notify me of every notification" automation (#35) would check GitHub every minute
+// and change the board's load counts, so this run starts with it already added (and gone); a check
+// below makes it in a config of its own.
+mkdirSync(join(process.env.XDG_CONFIG_HOME, 'gitbox'), { recursive: true });
+writeFileSync(join(process.env.XDG_CONFIG_HOME, 'gitbox', 'state.json'), JSON.stringify({ notify_seeded: true }));
 const saved = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'state.json'), 'utf8'));
 
 const text = () => all_text().join('\n');
@@ -1008,6 +1014,8 @@ check('the board is back as it was', badges('50+') === 4);
 
 // Automations: a condition per row, its field from a menu, then the steps; saved in automations.json.
 const automations_json = () => JSON.parse(readFileSync(join(process.env.XDG_CONFIG_HOME!, 'gitbox', 'automations.json'), 'utf8'));
+/** Deletes every automation, as the list's Delete would. */
+const remove_all = () => automations.list.map((a) => a.id).forEach((id) => put_remove(id));
 click_test_id('nav-automations');
 click_test_id('new-automation');
 pump();
@@ -1079,7 +1087,57 @@ await reveal_click('cond-remove-0');
 await reveal_click('automation-save');
 pump();
 check('an automation needs a condition', text().includes('Add a condition') && automations_json().length === 0);
-await reveal_click('automation-cancel');
+// …unless its one step is a notification, which can go to every notification (#35).
+await reveal_click('step-approve');
+await reveal_click('step-notify');
+await reveal_click('automation-save');
+pump();
+check('a notification alone needs no condition', automations_json().length === 1 && automations_json()[0].then.join() === 'notify' && automations_json()[0].when.length === 0);
+remove_all();
+
+// macOS notifications (#35), through a fake notifier (the native one needs the app's bundle): a
+// notify-only automation rings for each new thread, at most 5 times a check and then once for the
+// rest; again when a thread has new activity; and the activity says why when it can't.
+const posts: Post[] = [];
+let refusal: string | null = null;
+notifier.current = { post: (p) => posts.push(p), permission: async () => refusal };
+put({ id: 'notify-test', name: 'Ring', enabled: true, when: [], then: ['notify'], created: '2000-01-01T00:00:00.000Z' });
+await check_automations();
+check(
+  'a notify-only automation rings 5 times, then once for the rest',
+  posts.length === 6 && posts[5].body === 'And 45 more notifications' && posts[0].title === 'octo/repo #1' &&
+  posts[0].body === 'Note 1' && posts[0].url === 'https://github.com/octo/repo/pull/1' && posts[0].subtitle === 'Mention'
+);
+await check_automations();
+check('a thread rings once for each update', posts.length === 6);
+automations.log = automations.log.map((r) => (r.thread === '3' ? { ...r, updated_at: '2000-01-01T00:00:00.000Z' } : r));
+await check_automations();
+check('new activity on a thread rings again', posts.length === 7 && posts[6].body === 'Note 3');
+refusal = 'not allowed';
+automations.log = automations.log.filter((r) => r.thread !== '5');
+await check_automations();
+check('a refused permission shows in the activity', automations.log[0].thread === '5' && !!automations.log[0].error?.includes('Notifications are off for Gitbox'));
+notifier.current = null;
+automations.log = automations.log.filter((r) => r.thread !== '5');
+await check_automations();
+check('without the native library, the step says so', !!automations.log[0].error?.includes('need the Gitbox app'));
+remove_all();
+
+// The ready-made automation: added once, to a config that never had it, and on.
+const home = process.env.XDG_CONFIG_HOME;
+process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'gitbox-seed-'));
+init_automations();
+const seeded = automations.list.find((a) => a.id === 'notify-all');
+check(
+  'a new config gets "Notify me of every notification", on',
+  automations.list.length === 1 && !!seeded?.enabled && seeded.when.length === 0 && seeded.then.join() === 'notify' &&
+  describe(seeded) === 'When anything arrives, send a macOS notification.'
+);
+put({ ...seeded!, enabled: false });
+init_automations();
+check('it is added only once, and keeps its switch', automations.list.length === 1 && automations.list[0].enabled === false);
+process.env.XDG_CONFIG_HOME = home;
+init_automations();
 press('ctrl-1');
 
 // Chat: Apple's on-device model through fm. The first turn starts the transcript with the user and
@@ -1370,4 +1428,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 158);
+finish('gitbox', 166);

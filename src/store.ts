@@ -14,6 +14,8 @@ export type Saved = {
 	automation_log?: Run[];
 	/** Each GitHub repository's local checkout (`owner/repo` in lower case → path), as Whiteboard needs one (#22). */
 	repo_paths?: Record<string, string>;
+	/** The ready-made "Notify me of every notification" automation was added (#35), so it isn't again. */
+	notify_seeded?: boolean;
 };
 
 // Resolved per call, so a test can point XDG_CONFIG_HOME elsewhere after the imports.
