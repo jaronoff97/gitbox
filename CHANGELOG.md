@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/jaronoff97/gitbox/compare/v0.2.1...v0.3.0) (2026-11-02)
+
+
+### Features
+
+* **notifications:** group an automation's notifications by any filter field ([#37](https://github.com/jaronoff97/gitbox/issues/37)) ([f00a813](https://github.com/jaronoff97/gitbox/commit/f00a8135b2fe70b5122fa70647a5f32bbb745f2e))
+* **notifications:** send native macOS notifications from automations ([#36](https://github.com/jaronoff97/gitbox/issues/36)) ([3e7ef16](https://github.com/jaronoff97/gitbox/commit/3e7ef16e000d0d46044bc02fbba96cf5ae9e7abf))
+
+
+### Bug Fixes
+
+* **cards:** ignore the second click of a double-click ([#38](https://github.com/jaronoff97/gitbox/issues/38)) ([6092ee5](https://github.com/jaronoff97/gitbox/commit/6092ee5f22a7629de4888650832f060dce691726))
+
 ## [0.2.1](https://github.com/jaronoff97/gitbox/compare/v0.2.0...v0.2.1) (2026-11-02)
 
 
