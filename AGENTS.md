@@ -253,7 +253,11 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   sizes. "System" reads `defaults read -g AppleInterfaceStyle` every 30 s.
 - `src/icons.ts` — Octicons as raw markup for `<svg source>`, which a compiled binary needs.
 - `assets/icon.svg`, `assets/icon.png` — the app icon and its 1024 px render (see `build.ts`).
-- `test.ts` — the headless test (`gpuix-svelte/test`); a plain script that exits 1 on failure. It
+- `test.ts` — the headless test (`gpuix-svelte/test`); a plain script that exits 1 on failure. Its
+  window is 1024×642, the most that GitHub's macOS runner's screen holds (a headless window is no
+  bigger than the screen), so it passes there as on a big screen: `card_click` and `into_view` scroll
+  a card's lane until the card is in the window and clear of the bottom bar, and `reveal_click`
+  scrolls an editor or dialog. `.github/workflows/test.yml` runs it, and the typecheck, on every PR. It
   puts a fake `gh` first on `PATH` and points `XDG_CONFIG_HOME` at a temp dir, so it needs no
   GitHub account and leaves the real saved state alone. A fake `open` and `pbcopy` sit beside it,
   and every action call goes to a log the test reads (`calls()`), so no browser opens and the
