@@ -104,8 +104,9 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   the title bar is transparent (`titlebarTransparent`), so the top 52 px of the sidebar and the
   toolbar are the title bar, and the traffic lights sit atop the sidebar; `standalone.ts` has the
   same options.
-- `dev.ts` — what `npm start` runs: `app.ts` as the gpuix-svelte bin would, but on macOS from a hard
-  link to the runtime inside `dist/dev/Gitbox Dev.app`, so the Dock and menu bar show "Gitbox Dev"
+- `dev.ts` — what `npm start` runs: `app.ts` as the gpuix-svelte bin would, but on macOS from a copy
+  of the runtime inside `dist/dev/Gitbox Dev.app` (signed ad hoc, for notifications; copied and
+  signed again when the runtime changes), so the Dock and menu bar show "Gitbox Dev"
   with the icon inverted (rendered from `assets/icon.svg` through an SVG colour filter) rather than
   "bun" or "node". `npm run build` deletes `dist/`; the next start makes it again.
 - `bundle.ts` — the macOS `.app` wrapper (`Info.plist`, `.icns` from `assets/icon.png`) that
@@ -139,8 +140,14 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   entries from `options()`, "Go to" lanes, and "Open:" notifications (⌘↩ focuses the card).
   `>`, `#`, `@` narrow it to commands, filters, authors. `src/fuzzy.ts` scores the match; the last
   5 commands run (`recent` in state.json) lead the empty palette.
+- `src/notify.ts`, `native/notify.m` — macOS notifications (#35), the automations' notify step,
+  through `UNUserNotificationCenter`, in the same library as the menu bar. macOS asks for permission
+  at the first one. A click queues the notification's URL, which `menubar.ts`'s 50 ms poll opens.
+  macOS allows them only to a bundle with its own signature (ad hoc is enough) that doesn't run from
+  `/tmp`, so `dev.ts` copies the runtime into `Gitbox Dev.app` and signs it ad hoc. Only on macOS
+  under Bun; the test sets a fake `notifier`.
 - `src/menubar.ts`, `native/menu.m` — the native macOS menu bar (#7), from the registry. gpuix-svelte
-  has no menu API, so `menu.m` (AppKit) loads over `bun:ffi`: compiled by clang into
+  has no menu API, so `menu.m` (AppKit) loads over `bun:ffi`, with `notify.m`: compiled by clang into
   `dist/dev/libgitbox_menu.dylib` in development, into `Gitbox.app/Contents/Frameworks` by
   `build.ts`. A click queues the command id; JS polls it every 50 ms. ⌘ keys are key equivalents
   (the registry then leaves them to the menu); single keys, ⌘A, ⌘↩ and the Edit items are hints
@@ -148,7 +155,10 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   items to each new menu. Node has no FFI: `npm start` keeps GPUI's menu. The headless test sets
   `GITBOX_NO_MENU`; `GITBOX_MENU_DEBUG=1` logs the menu bar, `=perform:<id>` also clicks an item.
 - `src/automations.svelte.ts` — automations: conditions (board `Filter`s, so `matches` decides;
-  case doesn't matter) and steps (approve, read, done, unsubscribe, in that order). `watch()`, from
+  case doesn't matter) and steps (approve, read, done, unsubscribe, notify, in that order). An
+  automation needs a condition unless its one step is the notification; such a notify-only one acts
+  again when a thread has new activity (`updated_at` in the log). A check rings at most 5 times, then
+  once for the rest. "Notify me of every notification" is added once (`notify_seeded`), on. `watch()`, from
   `App.svelte` once onboarded, fetches the first unread page every minute and runs each enabled
   automation on what it matches, once per thread and only on threads updated after it was made.
   Each run goes to `automation_log`, which is also what stops a second run.

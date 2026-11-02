@@ -1,6 +1,8 @@
 // `npm start` / `bun run start`: app.ts with hot reload, as the gpuix-svelte bin would run it. On macOS
-// the runtime runs from dist/dev/Gitbox Dev.app (a hard link), so the Dock and menu bar show
-// "Gitbox Dev" with the icon inverted, apart from an installed Gitbox, rather than "bun" or "node".
+// the runtime runs from dist/dev/Gitbox Dev.app, so the Dock and menu bar show "Gitbox Dev" with the
+// icon inverted, apart from an installed Gitbox, rather than "bun" or "node". The runtime is a copy
+// and the bundle is signed ad hoc: macOS allows notifications (#35) only to a bundle with its own
+// signature, and signing a hard link would rewrite the runtime's own file.
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -15,10 +17,17 @@ if (process.platform === 'darwin') {
 	const icon = 'dist/dev/icon-dev.png';
 	const stale = (out: string, source: string) => !existsSync(out) || statSync(source).mtimeMs > statSync(out).mtimeMs;
 	if (stale(icon, 'assets/icon.svg')) invert('assets/icon.svg', icon);
-	if (stale(`${app}/Contents/Resources/AppIcon.icns`, icon))
-		write_bundle(app, process.execPath, { link: true, name: 'Gitbox Dev', id: 'io.github.jaronoff97.gitbox.dev', icon });
-	// Linked again each start, so it is always the runtime this script runs on.
-	else put_executable(app, process.execPath, true);
+	// Copied (and the bundle signed) again when the runtime this script runs on changes.
+	const stamp = 'dist/dev/runtime.stamp';
+	const source = statSync(process.execPath);
+	const want = `${process.execPath}:${source.size}:${source.mtimeMs}`;
+	const fresh = stale(`${app}/Contents/Resources/AppIcon.icns`, icon);
+	if (fresh) write_bundle(app, process.execPath, { name: 'Gitbox Dev', id: 'io.github.jaronoff97.gitbox.dev', icon });
+	if (fresh || !existsSync(stamp) || readFileSync(stamp, 'utf8') !== want) {
+		if (!fresh) put_executable(app, process.execPath);
+		run('codesign', ['--force', '--deep', '--sign', '-', app]);
+		writeFileSync(stamp, want);
+	}
 	runtime = `${app}/Contents/MacOS/gitbox`;
 }
 

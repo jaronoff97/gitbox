@@ -13,7 +13,7 @@ import type { BunPlugin } from 'bun';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { load_module, load_svelte, resolve_native_cjs, resolve_svelte } from 'gpuix-svelte/plugin';
-import { run, write_bundle } from './bundle.ts';
+import { CLANG, NATIVE, run, write_bundle } from './bundle.ts';
 import pkg from './package.json' with { type: 'json' };
 
 const conditions = ['custom-renderer', 'production'];
@@ -64,9 +64,10 @@ console.log(`built ${outfile}`);
 if (process.platform === 'darwin') {
 	const app = 'dist/Gitbox.app';
 	write_bundle(app, outfile);
-	// The native menu bar (#7): src/menubar.ts finds it in Frameworks, or beside the bare binary.
+	// The native menu bar (#7) and notifications (#35): src/menubar.ts finds the library in Frameworks,
+	// or beside the bare binary.
 	mkdirSync(`${app}/Contents/Frameworks`);
-	run('clang', ['-dynamiclib', '-fobjc-arc', '-framework', 'AppKit', '-o', `${app}/Contents/Frameworks/libgitbox_menu.dylib`, 'native/menu.m']);
+	run('clang', [...CLANG, '-o', `${app}/Contents/Frameworks/libgitbox_menu.dylib`, ...NATIVE]);
 	run('cp', [`${app}/Contents/Frameworks/libgitbox_menu.dylib`, 'dist/libgitbox_menu.dylib']);
 	sign(app);
 	if (identity && notary) notarize(app);

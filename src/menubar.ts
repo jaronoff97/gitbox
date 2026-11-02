@@ -8,6 +8,9 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { caps, commands, enabled, native_menu, run, single, type Command, type Group } from './commands.svelte.ts';
+import { open_url } from './gh.ts';
+import { notifier } from './notify.ts';
+import { CLANG, NATIVE } from '../bundle.ts';
 
 export type Item = {
 	id?: string;
@@ -82,17 +85,17 @@ export function menu_json(list: Command[] = commands()): Menu[] {
 		.filter((m) => m.items.length);
 }
 
-/** The compiled library: in Gitbox.app's Frameworks, beside the bare binary, or built from
- * native/menu.m in development (again when the source is newer). */
+/** The compiled library: in Gitbox.app's Frameworks, beside the bare binary, or built from native/
+ * in development (again when a source is newer). */
 function library(): string | null {
 	const exe = dirname(process.execPath);
 	for (const p of [join(exe, '../Frameworks/libgitbox_menu.dylib'), join(exe, 'libgitbox_menu.dylib')]) if (existsSync(p)) return p;
-	const src = fileURLToPath(new URL('../native/menu.m', import.meta.url));
-	if (!existsSync(src)) return null;
-	const out = join(dirname(src), '../dist/dev/libgitbox_menu.dylib');
-	if (!existsSync(out) || statSync(src).mtimeMs > statSync(out).mtimeMs) {
+	const sources = NATIVE.map((f) => fileURLToPath(new URL(`../${f}`, import.meta.url)));
+	if (!sources.every(existsSync)) return null;
+	const out = join(dirname(sources[0]), '../dist/dev/libgitbox_menu.dylib');
+	if (!existsSync(out) || sources.some((src) => statSync(src).mtimeMs > statSync(out).mtimeMs)) {
 		mkdirSync(dirname(out), { recursive: true });
-		execFileSync('clang', ['-dynamiclib', '-fobjc-arc', '-framework', 'AppKit', '-o', out, src]);
+		execFileSync('clang', [...CLANG, '-o', out, ...sources]);
 	}
 	return out;
 }
@@ -109,15 +112,34 @@ export async function install(): Promise<{ set(menus: Menu[]): void; stop(): voi
 			gitbox_menu_set: { args: [FFIType.ptr], returns: FFIType.i32 },
 			gitbox_menu_poll: { args: [], returns: FFIType.ptr },
 			gitbox_menu_describe: { args: [], returns: FFIType.ptr },
-			gitbox_menu_perform: { args: [FFIType.ptr], returns: FFIType.i32 }
+			gitbox_menu_perform: { args: [FFIType.ptr], returns: FFIType.i32 },
+			gitbox_notify_listen: { args: [], returns: FFIType.void },
+			gitbox_notify_init: { args: [], returns: FFIType.void },
+			gitbox_notify_allowed: { args: [], returns: FFIType.i32 },
+			gitbox_notify_reason: { args: [], returns: FFIType.ptr },
+			gitbox_notify_post: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
+			gitbox_notify_poll: { args: [], returns: FFIType.ptr }
 		});
 		const cstr = (s: string) => Buffer.from(`${s}\0`);
 		const debug = process.env.GITBOX_MENU_DEBUG;
 		let last = '';
+		// Clicks on a notification open what it names, as the polled menu clicks run commands.
+		lib.symbols.gitbox_notify_listen();
 		const timer = setInterval(() => {
 			for (let p = lib.symbols.gitbox_menu_poll(); p; p = lib.symbols.gitbox_menu_poll()) run(new CString(p).toString());
+			for (let p = lib.symbols.gitbox_notify_poll(); p; p = lib.symbols.gitbox_notify_poll()) open_url(new CString(p).toString());
 		}, 50);
 		native_menu.on = true;
+		notifier.current = {
+			post: (n) => lib.symbols.gitbox_notify_post(cstr(n.id), cstr(n.title), cstr(n.subtitle), cstr(n.body), cstr(n.group), cstr(n.url)),
+			permission: async () => {
+				lib.symbols.gitbox_notify_init();
+				// macOS answers on its own thread; the first time, after the user picks in its prompt.
+				for (let k = 0; k < 1200 && lib.symbols.gitbox_notify_allowed() < 0; k++) await new Promise((r) => setTimeout(r, 100));
+				const allowed = lib.symbols.gitbox_notify_allowed();
+				return allowed === 1 ? null : allowed < 0 ? 'macOS did not answer' : new CString(lib.symbols.gitbox_notify_reason()!).toString() || 'not allowed';
+			}
+		};
 		if (debug?.startsWith('perform:'))
 			setTimeout(() => console.error('[menubar] perform', debug, lib.symbols.gitbox_menu_perform(cstr(debug.slice(8)))), 3000);
 		return {
@@ -131,6 +153,7 @@ export async function install(): Promise<{ set(menus: Menu[]): void; stop(): voi
 			stop() {
 				clearInterval(timer);
 				native_menu.on = false;
+				notifier.current = null;
 				lib.close();
 			}
 		};

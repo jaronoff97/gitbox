@@ -3,14 +3,17 @@
 // `bun` or `node` shows as that; inside this bundle it shows as Gitbox with the icon.
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, linkSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import pkg from './package.json' with { type: 'json' };
 
 export const ICON = 'assets/icon.png';
 
+/** The native library's sources, the menu bar (#7) and notifications (#35), and how clang builds
+ * them: src/menubar.ts in development, build.ts into Gitbox.app. */
+export const NATIVE = ['native/menu.m', 'native/notify.m'];
+export const CLANG = ['-dynamiclib', '-fobjc-arc', '-framework', 'AppKit', '-framework', 'UserNotifications'];
+
 export type BundleOptions = {
-	/** Hard-link `exe` rather than copy it (dev: no 100 MB copy); falls back to a copy across file systems. */
-	link?: boolean;
 	name?: string;
 	id?: string;
 	/** A 1024 px PNG. */
@@ -21,26 +24,23 @@ export type BundleOptions = {
 export function write_bundle(
 	app: string,
 	exe: string,
-	{ link = false, name = 'Gitbox', id = 'io.github.jaronoff97.gitbox', icon = ICON }: BundleOptions = {}
+	{ name = 'Gitbox', id = 'io.github.jaronoff97.gitbox', icon = ICON }: BundleOptions = {}
 ) {
 	rmSync(app, { recursive: true, force: true });
 	mkdirSync(`${app}/Contents/MacOS`, { recursive: true });
 	mkdirSync(`${app}/Contents/Resources`, { recursive: true });
-	put_executable(app, exe, link);
+	put_executable(app, exe);
 	writeFileSync(`${app}/Contents/Info.plist`, plist(pkg.version, name, id));
 	icns(icon, `${app}/Contents/Resources/AppIcon.icns`, `${app}.iconset`);
 }
 
-export function put_executable(app: string, exe: string, link: boolean) {
+/** Copies `exe` in as the bundle's executable. (A hard link would keep the runtime's own signature,
+ * and signing the bundle would then rewrite the runtime's file.) */
+export function put_executable(app: string, exe: string) {
 	const inner = `${app}/Contents/MacOS/gitbox`;
 	rmSync(inner, { force: true });
-	try {
-		if (!link) throw new Error('copy');
-		linkSync(exe, inner);
-	} catch {
-		copyFileSync(exe, inner);
-		chmodSync(inner, 0o755);
-	}
+	copyFileSync(exe, inner);
+	chmodSync(inner, 0o755);
 }
 
 function plist(version: string, name: string, id: string) {

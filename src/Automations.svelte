@@ -2,7 +2,7 @@
 	import Popover from 'gpuix-svelte/components/Popover.svelte';
 	import Scroller from 'gpuix-svelte/components/Scroller.svelte';
 	import type { GpuixEvent } from 'gpuix-svelte';
-	import { automations, describe, put, remove, STEPS, type Automation, type Step } from './automations.svelte.ts';
+	import { automations, describe, notify_only, put, remove, STEPS, type Automation, type Step } from './automations.svelte.ts';
 	import { FIELDS, field, type Field } from './filters.ts';
 	import { ago } from './ago.ts';
 	import { open_url } from './gh.ts';
@@ -51,7 +51,8 @@
 
 	function submit() {
 		const a = { ...draft!, name: draft!.name.trim(), when: draft!.when.filter((f) => f.value.trim()) };
-		if (!a.when.length) return void (problem = 'Add a condition: an automation with none would act on everything.');
+		// A notification alone may go to everything; any other step needs a condition.
+		if (!a.when.length && !notify_only(a)) return void (problem = 'Add a condition: an automation with none would act on everything. Only a notification can go to every notification.');
 		if (!a.then.length) return void (problem = 'Pick a step for it to take.');
 		put(a);
 		edit(null);
