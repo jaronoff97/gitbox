@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/jaronoff97/gitbox/compare/v0.2.0...v0.2.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **ci:** run the test at the runner's window size, on every pull request ([#33](https://github.com/jaronoff97/gitbox/issues/33)) ([c83dc7d](https://github.com/jaronoff97/gitbox/commit/c83dc7d5f305c33d5cd8e6b487f5efa96885051b))
+
 ## [0.2.0](https://github.com/jaronoff97/gitbox/compare/v0.1.0...v0.2.0) (2026-10-30)
 
 
