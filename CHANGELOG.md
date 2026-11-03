@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/jaronoff97/gitbox/compare/v0.3.1...v0.4.0) (2026-11-03)
+
+
+### Features
+
+* **dock:** badge the app icon with the open notifications ([#46](https://github.com/jaronoff97/gitbox/issues/46)) ([b8847c5](https://github.com/jaronoff97/gitbox/commit/b8847c5ac248dcf1dca396e2f2f66fe4f7537e26))
+
+
+### Bug Fixes
+
+* **automations:** window the panel's rows, and ring only after the launch ([#45](https://github.com/jaronoff97/gitbox/issues/45)) ([bd4be72](https://github.com/jaronoff97/gitbox/commit/bd4be7214ea8cc98849d18371818dbb385123ff1))
+
 ## [0.3.1](https://github.com/jaronoff97/gitbox/compare/v0.3.0...v0.3.1) (2026-11-02)
 
 
