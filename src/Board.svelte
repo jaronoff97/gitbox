@@ -19,6 +19,7 @@
 	import { track } from './jobs.svelte.ts';
 	import { add_upstream, ForkCheckout, open_pr } from './whiteboard.ts';
 	import { board } from './tools.svelte.ts';
+	import { badge } from './notify.ts';
 	import { LANE_TITLES, lane_shown, settings, toggle_lane, update, type Sort } from './settings.svelte.ts';
 
 	/** Back to onboarding, for when gh stops working after setup (a logout, say). `active`: the
@@ -384,6 +385,14 @@
 		};
 		return () => (board.current = null);
 	});
+
+	// The Dock icon's badge: the unread notifications that are still open (not in Merged / Closed),
+	// with "+" while GitHub has pages not loaded yet; none takes the badge away.
+	$effect(() => {
+		const open = items.filter((n) => n.unread && lane_of(n) !== 'done').length;
+		badge(open ? `${open}${more ? '+' : ''}` : '');
+	});
+	$effect(() => () => badge(''));
 
 	/** The refresh button and ⌘R: not while a load runs, so a second press can't start it over. */
 	const refresh = () => !loading && start();

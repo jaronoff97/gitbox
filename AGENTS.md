@@ -148,6 +148,9 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   macOS allows them only to a bundle with its own signature (ad hoc is enough) that doesn't run from
   `/tmp`, so `dev.ts` copies the runtime into `Gitbox Dev.app` and signs it ad hoc. Only on macOS
   under Bun; the test sets a fake `notifier`.
+- `native/dock.m` — the Dock icon's badge: `Board.svelte` counts the unread notifications not in
+  Merged / Closed ("+" while pages wait) and calls `badge()` in `src/notify.ts`, which keeps the
+  label until `menubar.ts` loads the library and sets it. The test reads `dock.label`.
 - `src/menubar.ts`, `native/menu.m` — the native macOS menu bar (#7), from the registry. gpuix-svelte
   has no menu API, so `menu.m` (AppKit) loads over `bun:ffi`, with `notify.m`: compiled by clang into
   `dist/dev/libgitbox_menu.dylib` in development, into `Gitbox.app/Contents/Frameworks` by

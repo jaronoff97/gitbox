@@ -22,6 +22,16 @@ export type Notifier = {
 
 export const notifier: { current: Notifier | null } = { current: null };
 
+/** The Dock icon's badge. `set` is the native one once the library loads (after the board has
+ * counted, so the loader applies the last `label`); a test sets its own. */
+export const dock: { set: ((label: string) => void) | null; label: string } = { set: null, label: '' };
+
+/** Shows `label` on the Dock icon ('' takes it away). */
+export function badge(label: string) {
+	dock.label = label;
+	dock.set?.(label);
+}
+
 /** Shows `p`, asking macOS for permission first; rejects with why it can't. */
 export async function notify(p: Post) {
 	const n = notifier.current;
