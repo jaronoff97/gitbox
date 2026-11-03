@@ -8,9 +8,9 @@ import pkg from './package.json' with { type: 'json' };
 
 export const ICON = 'assets/icon.png';
 
-/** The native library's sources, the menu bar (#7) and notifications (#35), and how clang builds
+/** The native library's sources, the menu bar (#7), notifications (#35) and the Dock badge, and how clang builds
  * them: src/menubar.ts in development, build.ts into Gitbox.app. */
-export const NATIVE = ['native/menu.m', 'native/notify.m'];
+export const NATIVE = ['native/menu.m', 'native/notify.m', 'native/dock.m'];
 export const CLANG = ['-dynamiclib', '-fobjc-arc', '-framework', 'AppKit', '-framework', 'UserNotifications'];
 
 export type BundleOptions = {

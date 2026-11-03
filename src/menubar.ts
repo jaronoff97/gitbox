@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { caps, commands, enabled, native_menu, run, single, type Command, type Group } from './commands.svelte.ts';
 import { open_url } from './gh.ts';
-import { notifier } from './notify.ts';
+import { dock, notifier } from './notify.ts';
 import { CLANG, NATIVE } from '../bundle.ts';
 
 export type Item = {
@@ -118,7 +118,8 @@ export async function install(): Promise<{ set(menus: Menu[]): void; stop(): voi
 			gitbox_notify_allowed: { args: [], returns: FFIType.i32 },
 			gitbox_notify_reason: { args: [], returns: FFIType.ptr },
 			gitbox_notify_post: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
-			gitbox_notify_poll: { args: [], returns: FFIType.ptr }
+			gitbox_notify_poll: { args: [], returns: FFIType.ptr },
+			gitbox_dock_badge: { args: [FFIType.ptr], returns: FFIType.void }
 		});
 		const cstr = (s: string) => Buffer.from(`${s}\0`);
 		const debug = process.env.GITBOX_MENU_DEBUG;
@@ -130,6 +131,8 @@ export async function install(): Promise<{ set(menus: Menu[]): void; stop(): voi
 			for (let p = lib.symbols.gitbox_notify_poll(); p; p = lib.symbols.gitbox_notify_poll()) open_url(new CString(p).toString());
 		}, 50);
 		native_menu.on = true;
+		dock.set = (label) => lib.symbols.gitbox_dock_badge(cstr(label));
+		dock.set(dock.label);
 		notifier.current = {
 			post: (n) => lib.symbols.gitbox_notify_post(cstr(n.id), cstr(n.title), cstr(n.subtitle), cstr(n.body), cstr(n.group), cstr(n.url)),
 			permission: async () => {
@@ -154,6 +157,8 @@ export async function install(): Promise<{ set(menus: Menu[]): void; stop(): voi
 				clearInterval(timer);
 				native_menu.on = false;
 				notifier.current = null;
+				dock.set?.('');
+				dock.set = null;
 				lib.close();
 			}
 		};

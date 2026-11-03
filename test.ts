@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { dispatch } from 'gpuix-svelte/renderer';
 import App from './App.svelte';
 import { automations, check as check_automations, describe, init as init_automations, put, remove as put_remove } from './src/automations.svelte.ts';
-import { notifier, type Post } from './src/notify.ts';
+import { dock, notifier, type Post } from './src/notify.ts';
 import { matches } from './src/filters.ts';
 import { score } from './src/fuzzy.ts';
 import { link, open_url, without_images, type Notification } from './src/gh.ts';
@@ -285,6 +285,9 @@ const badges = (b: string) => all_text().filter((t) => t === b).length;
 await wait_for(() => badges('50+') === 4, { label: 'the first 50 cards of every lane' });
 await wait_for(() => !text().includes('loading…'), { label: 'the start settles' });
 check('a card shows its PR’s number after the repository', has('#4') && has('#1'));
+// The Dock badge (native/dock.m; headless, the label it would get): the unread notifications not in
+// Merged / Closed. Four pages are 200, and every fourth is a merged PR; "+" as more pages wait.
+check('the Dock badge counts the open notifications', dock.label === '150+');
 // A double-click's second click (the one a double-click on the macOS title bar sends to the card
 // under the pointer after the window zooms) opens nothing.
 const opens_of_2 = () => calls().filter((c) => c.cmd === 'open https://github.com/octo/repo/pull/2').length;
@@ -1516,4 +1519,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 179);
+finish('gitbox', 180);
