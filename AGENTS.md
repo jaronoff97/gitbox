@@ -162,12 +162,16 @@ every `svelte` import to it. Keep `svelte` itself out of `package.json`.
   again when a thread has new activity (`updated_at` in the log). A check rings at most 5 times, then
   once for the rest. "Notify me of every notification" is added once (`notify_seeded`), on. An
   automation's `group_by` (any filter field; the repository when unset) is what its notifications
-  stack by in Notification Center: `group_of` gives the field's first value, or "no …". `watch()`, from
+  stack by in Notification Center: `group_of` gives the field's first value, or "no …". The first check
+  after a launch (`watch()`'s first that gets through) only marks what is there as seen (`quiet` runs,
+  out of the Activity list), so notifications start with the next new activity, unless the
+  automation's `ring_at_launch` is on. `watch()`, from
   `App.svelte` once onboarded, fetches the first unread page every minute and runs each enabled
   automation on what it matches, once per thread and only on threads updated after it was made.
   Each run goes to `automation_log`, which is also what stops a second run.
 - `src/Automations.svelte` — the Automations tab: the list (with on/off switches) and its activity
-  on the left, the editor on the right. A condition is a field from a menu, `is`, and a value, with
+  on the left, one windowed `<virtual-list>` as a lane is (the newest 25 runs, 25 more when your own
+  scroll reaches the end), the editor on the right. A condition is a field from a menu, `is`, and a value, with
   GitHub's values as chips for the fields that have a fixed set. Edits are a copy until Save.
 - `src/fm.ts`, `src/Chat.svelte` — the Chat tab: Apple's on-device model through the `fm` CLI that
   macOS 27 ships. `fm available` decides whether the tab offers a chat or says why not. Each

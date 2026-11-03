@@ -22,13 +22,26 @@ export type Automation = {
 	/** What a notification step stacks its notifications by in Notification Center, any field a
 	 * condition can use (the repository when unset). */
 	group_by?: Field;
+	/** Rings for what is already there when Gitbox starts. Off: the first check after a launch only
+	 * marks those threads as seen, and the notifications start with the next new activity. */
+	ring_at_launch?: boolean;
 	/** ISO time it was made. It acts only on notifications updated after, so saving one doesn't approve
 	 * a backlog. */
 	created: string;
 };
 
-/** One automation acting on one thread, at its `updated_at` then. */
-export type Run = { automation: string; thread: string; title: string; url: string | null; at: string; updated_at?: string; error?: string };
+/** One automation acting on one thread, at its `updated_at` then. `quiet`: a launch's check only
+ * marked it as seen (it stays out of the Activity list). */
+export type Run = {
+	automation: string;
+	thread: string;
+	title: string;
+	url: string | null;
+	at: string;
+	updated_at?: string;
+	error?: string;
+	quiet?: boolean;
+};
 
 /** What `n` stacks under when grouped by `key`: the field's first value ("no label" when it has none). */
 export function group_of(n: Notification, key: Field) {
@@ -123,7 +136,7 @@ export function describe(a: Automation) {
 
 /** Runs each enabled automation on the notifications it matches: once per thread, so new commits on
  * an approved PR don't approve it again; a notify-only automation again on new activity. */
-export async function apply(items: Notification[]) {
+export async function apply(items: Notification[], { launch = false } = {}) {
 	const todo = automations.list
 		.filter((a) => a.enabled && a.then.length && (a.when.length || notify_only(a)))
 		.flatMap((a) => items.filter((n) => n.updated_at >= a.created && matches(n, a.when)).map((n) => ({ a, n })))
@@ -147,8 +160,12 @@ export async function apply(items: Notification[]) {
 				at: new Date().toISOString(),
 				updated_at: n.updated_at
 			};
+			// At launch, a notification waits for the next new activity unless the automation says so.
+			const hush = launch && !a.ring_at_launch;
+			if (hush && notify_only(a)) run.quiet = true;
 			try {
 				for (const step of a.then) {
+					if (step === 'notify' && hush) continue;
 					// A burst (a first check after a while away) rings BURST times, then once for the rest.
 					if (step === 'notify' && rung >= BURST) {
 						muted++;
@@ -176,25 +193,29 @@ export async function apply(items: Notification[]) {
 		}).catch(() => {});
 }
 
-let running: Promise<void> | null = null;
+let running: Promise<boolean> | null = null;
 
 /** Fetches the newest unread notifications and applies the automations; while one check runs, this
- * returns it rather than starting another. */
-export function check(): Promise<void> {
+ * returns it rather than starting another. `launch`: the first check after Gitbox starts. */
+export function check({ launch = false } = {}): Promise<boolean> {
 	if (!running && automations.list.some((a) => a.enabled))
 		running = gh
 			.notifications(1)
-			.then(apply)
+			.then((items) => apply(items, { launch }))
+			.then(() => true)
 			// ponytail: a failed fetch waits for the next minute; the board shows gh's errors.
-			.catch(() => {})
+			.catch(() => false)
 			.finally(() => (running = null));
-	return running ?? Promise.resolve();
+	return running ?? Promise.resolve(false);
 }
 
 /** Checks now and every minute; returns what stops it (for an `$effect`, which must not depend on the
  * list it reads, or each edit would restart it). */
 export function watch() {
-	untrack(check);
-	const timer = setInterval(check, 60_000);
+	// The launch's check is the first one that gets through (one that fails, offline, doesn't count).
+	let launched = false;
+	const tick = () => check({ launch: !launched }).then((ok) => (launched ||= ok));
+	untrack(tick);
+	const timer = setInterval(tick, 60_000);
 	return () => clearInterval(timer);
 }
