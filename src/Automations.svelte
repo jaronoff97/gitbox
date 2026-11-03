@@ -23,6 +23,30 @@
 	/** The condition whose field menu is open. */
 	let picking = $state<number | null>(null);
 	let problem = $state('');
+	/** The activity's runs on show: the newest PAGE, and PAGE more as a scroll reaches the end. The
+	 * runs a launch's check only marked as seen stay out. */
+	const PAGE = 25;
+	let shown = $state(PAGE);
+	let touched_at = 0;
+	const runs = $derived(automations.log.filter((r) => !r.quiet));
+	type Row =
+		| { kind: 'automation'; key: string; a: Automation }
+		| { kind: 'none' | 'section' | 'empty'; key: string }
+		| { kind: 'run'; key: string; r: (typeof automations.log)[number] };
+	const rows: Row[] = $derived([
+		...(automations.list.length
+			? automations.list.map((a): Row => ({ kind: 'automation', key: `a:${a.id}`, a }))
+			: [{ kind: 'none', key: 'none' } as Row]),
+		{ kind: 'section', key: 'section' },
+		...(runs.length
+			? runs.slice(0, shown).map((r): Row => ({ kind: 'run', key: `r:${r.at}:${r.automation}:${r.thread}`, r }))
+			: [{ kind: 'empty', key: 'empty' } as Row])
+	]);
+	/** The end came into view by your own scroll: PAGE more runs. A short list stays as it is. */
+	function on_range(e: GpuixEvent) {
+		if ((e.endIndex ?? 0) >= rows.length - 3 && shown < runs.length && Date.now() - touched_at < 1000) shown += PAGE;
+	}
+
 	/** The notification step's Group by menu is open. */
 	let picking_group = $state(false);
 
@@ -89,33 +113,40 @@
 	</div>
 
 	<div class="body">
-		<div class="side">
-			<Scroller pad="12px" gap={6}>
-				{#each automations.list as a (a.id)}
-					<div class="item" class:on={draft?.id === a.id} hitbox="self" testId="automation-{a.id}" onclick={() => edit(a)}>
-						<div class="text">
-							<div class="label" class:dim={!a.enabled}>{a.name || 'Untitled'}</div>
-							<div class="hint">{describe(a)}</div>
-						</div>
-						{@render switch_(a.enabled, () => put({ ...a, enabled: !a.enabled }), `automation-on-${a.id}`)}
+		<!-- A windowed list, as a lane is: GPUI paints only the rows near the view, and the activity
+		     shows its newest PAGE runs, PAGE more each time your own scroll reaches its end. -->
+		<div class="side" testId="automation-side" onscroll={() => (touched_at = Date.now())}>
+			<virtual-list class="side-list" testId="automation-list" itemCount={rows.length} estimatedItemHeight={56} onvisiblerange={on_range}>
+				{#each rows as row (row.key)}
+					<div class="row">
+						{#if row.kind === 'automation'}
+							{@const a = row.a}
+							<div class="item" class:on={draft?.id === a.id} hitbox="self" testId="automation-{a.id}" onclick={() => edit(a)}>
+								<div class="text">
+									<div class="label" class:dim={!a.enabled}>{a.name || 'Untitled'}</div>
+									<div class="hint">{describe(a)}</div>
+								</div>
+								{@render switch_(a.enabled, () => put({ ...a, enabled: !a.enabled }), `automation-on-${a.id}`)}
+							</div>
+						{:else if row.kind === 'none'}
+							<div class="hint pad">No automations yet. Make one to approve, read or clear notifications as they arrive.</div>
+						{:else if row.kind === 'section'}
+							<div class="section">Activity</div>
+						{:else if row.kind === 'run'}
+							{@const r = row.r}
+							<div class="run" hitbox="self" testId="run" onclick={() => r.url && open_url(r.url)}>
+								<div class="dot" class:fail={!!r.error}></div>
+								<div class="text">
+									<div class="label">{r.title}</div>
+									<div class="hint" class:fail={!!r.error}>{name_of(r.automation)} · {r.error ?? 'done'} · {ago(r.at)}</div>
+								</div>
+							</div>
+						{:else}
+							<div class="hint pad">Nothing yet.</div>
+						{/if}
 					</div>
-				{:else}
-					<div class="hint pad">No automations yet. Make one to approve, read or clear notifications as they arrive.</div>
 				{/each}
-
-				<div class="section">Activity</div>
-				{#each automations.log.slice(0, 30) as r (r.at + r.automation + r.thread)}
-					<div class="run" hitbox="self" onclick={() => r.url && open_url(r.url)}>
-						<div class="dot" class:fail={!!r.error}></div>
-						<div class="text">
-							<div class="label">{r.title}</div>
-							<div class="hint" class:fail={!!r.error}>{name_of(r.automation)} · {r.error ?? 'done'} · {ago(r.at)}</div>
-						</div>
-					</div>
-				{:else}
-					<div class="hint pad">Nothing yet.</div>
-				{/each}
-			</Scroller>
+			</virtual-list>
 		</div>
 
 		<div class="editor">
@@ -209,6 +240,10 @@
 										</div>
 									{/snippet}
 								</Popover>
+							</div>
+							<div class="step indent">
+								{@render switch_(!!draft.ring_at_launch, () => (draft!.ring_at_launch = !draft!.ring_at_launch), 'ring-at-launch')}
+								<div class="label">Also ring for what's there when Gitbox starts</div>
 							</div>
 						{/if}
 					{/each}
@@ -388,6 +423,19 @@
 	}
 	.actions {
 		padding-top: 10px;
+	}
+	.side-list {
+		display: flex;
+		flex-direction: column;
+		flex-grow: 1;
+		min-height: 0;
+		padding: 12px 12px 12px 12px;
+		scrollbar-color: var(--thumb);
+		scrollbar-width: 6px;
+	}
+	.row {
+		width: 100%;
+		padding-bottom: 6px;
 	}
 	.indent {
 		padding-left: 44px;

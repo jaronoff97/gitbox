@@ -1141,7 +1141,47 @@ notifier.current = null;
 automations.log = automations.log.filter((r) => r.thread !== '5');
 await check_automations();
 check('without the native library, the step says so', !!automations.log[0].error?.includes('need the Gitbox app'));
+
+// The Activity list is windowed as a lane is: the newest 25 runs, and 25 more when your own scroll
+// reaches its end. (The rings above left over 50 runs.)
+const runs_shown = () => find_all((n) => n.testId === 'run').length;
+press('ctrl-2');
+pump();
+check('the activity shows its newest 25 runs', runs_shown() === 25);
+for (let k = 0; k < 12 && runs_shown() === 25; k++) {
+  wheel(find_test_id('automation-side')!, 0, -2000);
+  await wait(40);
+  pump();
+}
+check('a scroll to its end shows 25 more', runs_shown() === 50);
 remove_all();
+
+// At launch (the first check after Gitbox starts), a notification waits: the launch's check marks
+// what is there as seen, out of the Activity list, and the next new activity rings. An automation can
+// ring at launch too.
+notifier.current = { post: (p) => posts.push(p), permission: async () => null };
+automations.log = [];
+put({ id: 'notify-launch', name: 'Later', enabled: true, when: [], then: ['notify'], created: '2000-01-01T00:00:00.000Z' });
+const at_launch = posts.length;
+await check_automations({ launch: true });
+pump();
+check(
+  'a launch rings for nothing, and marks what is there as seen',
+  posts.length === at_launch && automations.log.length === 50 && automations.log.every((r) => r.quiet) && runs_shown() === 0
+);
+await check_automations();
+check('the next check rings only for new activity', posts.length === at_launch);
+automations.log = automations.log.map((r) => (r.thread === '7' ? { ...r, updated_at: '2000-01-01T00:00:00.000Z' } : r));
+await check_automations();
+check('new activity after the launch rings', posts.length === at_launch + 1 && posts.at(-1)!.body === 'Note 7');
+put_remove('notify-launch');
+automations.log = [];
+put({ id: 'notify-boot', name: 'Now', enabled: true, when: [], then: ['notify'], ring_at_launch: true, created: '2000-01-01T00:00:00.000Z' });
+const ringing = posts.length;
+await check_automations({ launch: true });
+check('an automation set to ring at launch rings then', posts.length === ringing + 6);
+remove_all();
+automations.log = [];
 
 // The ready-made automation: added once, to a config that never had it, and on.
 const home = process.env.XDG_CONFIG_HOME;
@@ -1476,4 +1516,4 @@ check(
   (await link(subject('PullRequest', 'x', 'https://api.github.com/repos/octo/repo/pulls/7'))) === 'https://github.com/octo/repo/pull/7'
 );
 
-finish('gitbox', 173);
+finish('gitbox', 179);
